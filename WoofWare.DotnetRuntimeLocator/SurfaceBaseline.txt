@@ -1,0 +1,47 @@
+WoofWare.DotnetRuntimeLocator.DotnetEnvironmentFrameworkInfo inherit obj, implements WoofWare.DotnetRuntimeLocator.DotnetEnvironmentFrameworkInfo System.IEquatable
+WoofWare.DotnetRuntimeLocator.DotnetEnvironmentFrameworkInfo..ctor [constructor]: (string, string, string)
+WoofWare.DotnetRuntimeLocator.DotnetEnvironmentFrameworkInfo.<Clone>$ [method]: unit -> WoofWare.DotnetRuntimeLocator.DotnetEnvironmentFrameworkInfo
+WoofWare.DotnetRuntimeLocator.DotnetEnvironmentFrameworkInfo.Deconstruct [method]: (System.String&, System.String&, System.String&) -> unit
+WoofWare.DotnetRuntimeLocator.DotnetEnvironmentFrameworkInfo.get_Name [method]: unit -> string
+WoofWare.DotnetRuntimeLocator.DotnetEnvironmentFrameworkInfo.get_Path [method]: unit -> string
+WoofWare.DotnetRuntimeLocator.DotnetEnvironmentFrameworkInfo.get_Version [method]: unit -> string
+WoofWare.DotnetRuntimeLocator.DotnetEnvironmentFrameworkInfo.Name [property]: string
+WoofWare.DotnetRuntimeLocator.DotnetEnvironmentFrameworkInfo.op_Equality [static method]: (WoofWare.DotnetRuntimeLocator.DotnetEnvironmentFrameworkInfo, WoofWare.DotnetRuntimeLocator.DotnetEnvironmentFrameworkInfo) -> bool
+WoofWare.DotnetRuntimeLocator.DotnetEnvironmentFrameworkInfo.op_Inequality [static method]: (WoofWare.DotnetRuntimeLocator.DotnetEnvironmentFrameworkInfo, WoofWare.DotnetRuntimeLocator.DotnetEnvironmentFrameworkInfo) -> bool
+WoofWare.DotnetRuntimeLocator.DotnetEnvironmentFrameworkInfo.Path [property]: string
+WoofWare.DotnetRuntimeLocator.DotnetEnvironmentFrameworkInfo.set_Name [method]: string -> unit
+WoofWare.DotnetRuntimeLocator.DotnetEnvironmentFrameworkInfo.set_Path [method]: string -> unit
+WoofWare.DotnetRuntimeLocator.DotnetEnvironmentFrameworkInfo.set_Version [method]: string -> unit
+WoofWare.DotnetRuntimeLocator.DotnetEnvironmentFrameworkInfo.Version [property]: string
+WoofWare.DotnetRuntimeLocator.DotnetEnvironmentInfo inherit obj, implements WoofWare.DotnetRuntimeLocator.DotnetEnvironmentInfo System.IEquatable
+WoofWare.DotnetRuntimeLocator.DotnetEnvironmentInfo..ctor [constructor]: (string, string, WoofWare.DotnetRuntimeLocator.DotnetEnvironmentSdkInfo System.Collections.Generic.IReadOnlyList, WoofWare.DotnetRuntimeLocator.DotnetEnvironmentFrameworkInfo System.Collections.Generic.IReadOnlyList)
+WoofWare.DotnetRuntimeLocator.DotnetEnvironmentInfo.<Clone>$ [method]: unit -> WoofWare.DotnetRuntimeLocator.DotnetEnvironmentInfo
+WoofWare.DotnetRuntimeLocator.DotnetEnvironmentInfo.Deconstruct [method]: (System.String&, System.String&, System.Collections.Generic.IReadOnlyList, System.Collections.Generic.IReadOnlyList) -> unit
+WoofWare.DotnetRuntimeLocator.DotnetEnvironmentInfo.Frameworks [property]: WoofWare.DotnetRuntimeLocator.DotnetEnvironmentFrameworkInfo System.Collections.Generic.IReadOnlyList
+WoofWare.DotnetRuntimeLocator.DotnetEnvironmentInfo.Get [static method]: unit -> WoofWare.DotnetRuntimeLocator.DotnetEnvironmentInfo
+WoofWare.DotnetRuntimeLocator.DotnetEnvironmentInfo.get_Frameworks [method]: unit -> WoofWare.DotnetRuntimeLocator.DotnetEnvironmentFrameworkInfo System.Collections.Generic.IReadOnlyList
+WoofWare.DotnetRuntimeLocator.DotnetEnvironmentInfo.get_HostFxrCommitHash [method]: unit -> string
+WoofWare.DotnetRuntimeLocator.DotnetEnvironmentInfo.get_HostFxrVersion [method]: unit -> string
+WoofWare.DotnetRuntimeLocator.DotnetEnvironmentInfo.get_Sdks [method]: unit -> WoofWare.DotnetRuntimeLocator.DotnetEnvironmentSdkInfo System.Collections.Generic.IReadOnlyList
+WoofWare.DotnetRuntimeLocator.DotnetEnvironmentInfo.GetSpecific [static method]: System.IO.FileInfo -> WoofWare.DotnetRuntimeLocator.DotnetEnvironmentInfo
+WoofWare.DotnetRuntimeLocator.DotnetEnvironmentInfo.HostFxrCommitHash [property]: string
+WoofWare.DotnetRuntimeLocator.DotnetEnvironmentInfo.HostFxrVersion [property]: string
+WoofWare.DotnetRuntimeLocator.DotnetEnvironmentInfo.op_Equality [static method]: (WoofWare.DotnetRuntimeLocator.DotnetEnvironmentInfo, WoofWare.DotnetRuntimeLocator.DotnetEnvironmentInfo) -> bool
+WoofWare.DotnetRuntimeLocator.DotnetEnvironmentInfo.op_Inequality [static method]: (WoofWare.DotnetRuntimeLocator.DotnetEnvironmentInfo, WoofWare.DotnetRuntimeLocator.DotnetEnvironmentInfo) -> bool
+WoofWare.DotnetRuntimeLocator.DotnetEnvironmentInfo.Sdks [property]: WoofWare.DotnetRuntimeLocator.DotnetEnvironmentSdkInfo System.Collections.Generic.IReadOnlyList
+WoofWare.DotnetRuntimeLocator.DotnetEnvironmentInfo.set_Frameworks [method]: WoofWare.DotnetRuntimeLocator.DotnetEnvironmentFrameworkInfo System.Collections.Generic.IReadOnlyList -> unit
+WoofWare.DotnetRuntimeLocator.DotnetEnvironmentInfo.set_HostFxrCommitHash [method]: string -> unit
+WoofWare.DotnetRuntimeLocator.DotnetEnvironmentInfo.set_HostFxrVersion [method]: string -> unit
+WoofWare.DotnetRuntimeLocator.DotnetEnvironmentInfo.set_Sdks [method]: WoofWare.DotnetRuntimeLocator.DotnetEnvironmentSdkInfo System.Collections.Generic.IReadOnlyList -> unit
+WoofWare.DotnetRuntimeLocator.DotnetEnvironmentSdkInfo inherit obj, implements WoofWare.DotnetRuntimeLocator.DotnetEnvironmentSdkInfo System.IEquatable
+WoofWare.DotnetRuntimeLocator.DotnetEnvironmentSdkInfo..ctor [constructor]: (string, string)
+WoofWare.DotnetRuntimeLocator.DotnetEnvironmentSdkInfo.<Clone>$ [method]: unit -> WoofWare.DotnetRuntimeLocator.DotnetEnvironmentSdkInfo
+WoofWare.DotnetRuntimeLocator.DotnetEnvironmentSdkInfo.Deconstruct [method]: (System.String&, System.String&) -> unit
+WoofWare.DotnetRuntimeLocator.DotnetEnvironmentSdkInfo.get_Path [method]: unit -> string
+WoofWare.DotnetRuntimeLocator.DotnetEnvironmentSdkInfo.get_Version [method]: unit -> string
+WoofWare.DotnetRuntimeLocator.DotnetEnvironmentSdkInfo.op_Equality [static method]: (WoofWare.DotnetRuntimeLocator.DotnetEnvironmentSdkInfo, WoofWare.DotnetRuntimeLocator.DotnetEnvironmentSdkInfo) -> bool
+WoofWare.DotnetRuntimeLocator.DotnetEnvironmentSdkInfo.op_Inequality [static method]: (WoofWare.DotnetRuntimeLocator.DotnetEnvironmentSdkInfo, WoofWare.DotnetRuntimeLocator.DotnetEnvironmentSdkInfo) -> bool
+WoofWare.DotnetRuntimeLocator.DotnetEnvironmentSdkInfo.Path [property]: string
+WoofWare.DotnetRuntimeLocator.DotnetEnvironmentSdkInfo.set_Path [method]: string -> unit
+WoofWare.DotnetRuntimeLocator.DotnetEnvironmentSdkInfo.set_Version [method]: string -> unit
+WoofWare.DotnetRuntimeLocator.DotnetEnvironmentSdkInfo.Version [property]: string

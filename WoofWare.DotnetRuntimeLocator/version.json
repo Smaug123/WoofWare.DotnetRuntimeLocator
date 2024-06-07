@@ -1,0 +1,10 @@
+{
+  "version": "0.1",
+  "publicReleaseRefSpec": null,
+  "pathFilters": [
+    "^Test/",
+    ":/WoofWare.DotnetRuntimeLocator",
+    ":/Directory.Build.props",
+    ":/README.md"
+  ]
+}
