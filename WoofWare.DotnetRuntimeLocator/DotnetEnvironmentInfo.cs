@@ -26,6 +26,16 @@ public record DotnetEnvironmentInfo(
 {
     private static readonly Lazy<FileInfo> HostFxr = new(() =>
     {
+        switch (Environment.GetEnvironmentVariable("WOOFWARE_DOTNET_LOCATOR_LIBHOSTFXR"))
+        {
+            case null:
+                break;
+            case var s:
+            {
+                return new FileInfo(s);
+            }
+        }
+
         // First, we might be self-contained: try and find it next to us.
         var selfContainedAttempt = Directory.GetParent(Assembly.GetExecutingAssembly().Location);
         if (selfContainedAttempt != null)
@@ -43,17 +53,12 @@ public record DotnetEnvironmentInfo(
                       throw new Exception("Unable to locate the host/fxr directory in the .NET runtime");
         var fxrDir = new DirectoryInfo(Path.Combine(parent3.FullName, "host", "fxr"));
         Func<DirectoryInfo, bool> isAcceptableName =
-            Environment.GetEnvironmentVariable("WOOFWARE_DOTNET_LOCATOR_RUNTIME_VERSION") switch
+            di =>
             {
-                null =>
-                    di =>
-                    {
-                        // Until net6, libhostfxr did not contain the entrypoint we use, and I can't be bothered to reimplement
-                        // it on those runtimes. I'm just going to assume you have no runtimes earlier than 3 installed.
-                        return !di.Name.StartsWith("3.", StringComparison.Ordinal) &&
-                               !di.Name.StartsWith("5.", StringComparison.Ordinal);
-                    },
-                var s => di => di.Name == s
+                // Until net6, libhostfxr did not contain the entrypoint we use, and I can't be bothered to reimplement
+                // it on those runtimes. I'm just going to assume you have no runtimes earlier than 3 installed.
+                return !di.Name.StartsWith("3.", StringComparison.Ordinal) &&
+                       !di.Name.StartsWith("5.", StringComparison.Ordinal);
             };
         return fxrDir.EnumerateDirectories().First(isAcceptableName).EnumerateFiles("*hostfxr*").First();
     });
