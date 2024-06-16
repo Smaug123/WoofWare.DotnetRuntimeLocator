@@ -164,6 +164,25 @@ public record DotnetEnvironmentInfo(
         }
     }
 
+    private static FileInfo? LocateDotnetExe()
+    {
+        var path = Environment.GetEnvironmentVariable("PATH");
+        if (path != null)
+        {
+            foreach (var component in path.Split(':'))
+            {
+                var dotnet = Path.Combine(component, "dotnet");
+                if (File.Exists(dotnet))
+                {
+                    return new FileInfo(dotnet);
+                }
+            }
+        }
+
+        var renv = RuntimeEnvironment.GetRuntimeDirectory();
+        return FindDotnetAbove(new DirectoryInfo(renv));
+    }
+
     /// <summary>
     ///     Get the environment information that is available to some arbitrary `dotnet` executable we were able to find.
     /// </summary>
@@ -171,14 +190,9 @@ public record DotnetEnvironmentInfo(
     /// <exception cref="Exception">Throws on any failure; handles nothing gracefully.</exception>
     public static DotnetEnvironmentInfo Get()
     {
-        var dotnetExe = FindDotnetAbove(new DirectoryInfo(RuntimeEnvironment.GetRuntimeDirectory()));
+        var dotnetExe = LocateDotnetExe();
 
-        if (ReferenceEquals(dotnetExe, null))
-        {
-            // This can happen! Maybe we're self-contained.
-            return GetSpecific(null);
-        }
-
+        // `null` can happen! Maybe we're self-contained.
         return GetSpecific(dotnetExe);
     }
 
