@@ -10,7 +10,7 @@ tmp=$(mktemp)
 
 if ! dotnet nuget push "$SOURCE_NUPKG" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json > "$tmp" ; then
     cat "$tmp"
-    if grep 'already exists at feed' "$tmp" ; then
+    if grep 'already exists and cannot be modified' "$tmp" ; then
         echo "result=skipped" >> "$GITHUB_OUTPUT"
         exit 0
     else
