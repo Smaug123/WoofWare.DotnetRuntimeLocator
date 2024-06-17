@@ -15,6 +15,8 @@ let info = DotnetEnvironmentInfo.GetSpecific "/path/to/dotnet"
 
 ## Troubleshooting
 
+The easiest way to make sure we can find a `dotnet` is to have one on your PATH.
+
 If you have a *very* strange setup, we may be unable to locate the `libhostfxr` library we use to find the runtimes.
 In that case, you can supply the environment variable `WOOFWARE_DOTNET_LOCATOR_LIBHOSTFXR`,
 which should be a full path to a `libhostfxr` DLL on your system.
