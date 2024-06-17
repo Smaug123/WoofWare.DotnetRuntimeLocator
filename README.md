@@ -10,7 +10,7 @@ See [the example](Example/Program.fs).
 ```fsharp
 let info = DotnetEnvironmentInfo.Get ()
 // or, if you already know a path to the `dotnet` executable...
-let info = DotnetEnvironmentInfo.Get "/path/to/dotnet"
+let info = DotnetEnvironmentInfo.GetSpecific "/path/to/dotnet"
 ```
 
 ## Troubleshooting
