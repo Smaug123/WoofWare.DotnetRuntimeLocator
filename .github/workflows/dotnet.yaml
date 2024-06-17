@@ -240,6 +240,7 @@ jobs:
         if: steps.publish-success.outputs.result == 'published'
         run: 'bash ./.github/workflows/assert-contents.sh'
       - name: Attest Build Provenance
+        if: steps.publish-success.outputs.result == 'published'
         uses: actions/attest-build-provenance@897ed5eab6ed058a474202017ada7f40bfa52940 # v1.0.0
         with:
           subject-path: "from-nuget.nupkg"
