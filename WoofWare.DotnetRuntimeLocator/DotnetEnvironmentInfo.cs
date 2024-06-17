@@ -52,14 +52,11 @@ public record DotnetEnvironmentInfo(
         var parent3 = parent2.Parent ??
                       throw new Exception("Unable to locate the host/fxr directory in the .NET runtime");
         var fxrDir = new DirectoryInfo(Path.Combine(parent3.FullName, "host", "fxr"));
+        // Until net6, libhostfxr did not contain the entrypoint we use, and I can't be bothered to reimplement
+        // it on those runtimes. I'm just going to assume you have no runtimes earlier than 3 installed.
         Func<DirectoryInfo, bool> isAcceptableName =
-            di =>
-            {
-                // Until net6, libhostfxr did not contain the entrypoint we use, and I can't be bothered to reimplement
-                // it on those runtimes. I'm just going to assume you have no runtimes earlier than 3 installed.
-                return !di.Name.StartsWith("3.", StringComparison.Ordinal) &&
-                       !di.Name.StartsWith("5.", StringComparison.Ordinal);
-            };
+            di => !di.Name.StartsWith("3.", StringComparison.Ordinal) &&
+                  !di.Name.StartsWith("5.", StringComparison.Ordinal);
         return fxrDir.EnumerateDirectories().First(isAcceptableName).EnumerateFiles("*hostfxr*").First();
     });
 
