@@ -210,7 +210,7 @@ public record DotnetEnvironmentInfo(
     ///     * A pointer to the context object you want to consume in the callback.
     ///     Returns zero on success.
     /// </summary>
-    internal delegate int RuntimeDelegate(IntPtr pathToDotnetExeDirectory, IntPtr mustBeNull, IntPtr outputCallback,
+    private delegate int RuntimeDelegate(IntPtr pathToDotnetExeDirectory, IntPtr mustBeNull, IntPtr outputCallback,
         IntPtr outputArg);
 
     /// <summary>
@@ -220,7 +220,7 @@ public record DotnetEnvironmentInfo(
     ///     (https://github.com/dotnet/runtime/blob/2dba5a3587de19160fb09129dcd3d7a4089b67b5/src/native/corehost/hostfxr.h#L311)
     ///     * a context object, which is up to you to define and to pass into the RuntimeDelegate.
     /// </summary>
-    internal delegate void StoreResultDelegate(IntPtr envInfo, IntPtr retLoc);
+    private delegate void StoreResultDelegate(IntPtr envInfo, IntPtr retLoc);
 }
 
 internal class FromNativeConstructor
