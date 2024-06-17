@@ -1,6 +1,6 @@
 #!/bin/bash
 
-SOURCE_NUPKG=$(find . type f -name '*.nupkg')
+SOURCE_NUPKG=$(find . -type f -name '*.nupkg')
 
 PACKAGE_VERSION=$(basename "$SOURCE_NUPKG" | rev | cut -d '.' -f 2-4 | rev)
 

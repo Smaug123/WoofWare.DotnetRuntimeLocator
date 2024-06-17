@@ -227,7 +227,7 @@ jobs:
       - name: Publish to NuGet
         id: publish-success
         env:
-          NUGET_API_KEY: ${{ secrets.GITHUB_TOKEN }}
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
         run: 'nix develop --command bash ./.github/workflows/nuget-push.sh "packed/WoofWare.DotnetRuntimeLocator.*.nupkg"'
       - name: Wait for availability
         if: steps.publish-success.outputs.result == 'published'
