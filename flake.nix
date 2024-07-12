@@ -17,7 +17,7 @@
       dotnet-sdk = pkgs.dotnet-sdk_8;
       dotnet-runtime = pkgs.dotnetCorePackages.runtime_8_0;
       version = "0.1";
-      dotnetTool = dllOverride: toolName: toolVersion: sha256:
+      dotnetTool = dllOverride: toolName: toolVersion: hash:
         pkgs.stdenvNoCC.mkDerivation rec {
           name = toolName;
           version = toolVersion;
@@ -25,7 +25,7 @@
           src = pkgs.fetchNuGet {
             pname = name;
             version = version;
-            sha256 = sha256;
+            hash = hash;
             installPhase = ''mkdir -p $out/bin && cp -r tools/net6.0/any/* $out/bin'';
           };
           installPhase = let
@@ -43,7 +43,7 @@
         };
     in {
       packages = {
-        fantomas = dotnetTool null "fantomas" (builtins.fromJSON (builtins.readFile ./.config/dotnet-tools.json)).tools.fantomas.version (builtins.head (builtins.filter (elem: elem.pname == "fantomas") ((import ./nix/deps.nix) {fetchNuGet = x: x;}))).sha256;
+        fantomas = dotnetTool null "fantomas" (builtins.fromJSON (builtins.readFile ./.config/dotnet-tools.json)).tools.fantomas.version (builtins.head (builtins.filter (elem: elem.pname == "fantomas") ((import ./nix/deps.nix) {fetchNuGet = x: x;}))).hash;
         default = pkgs.buildDotnetModule {
           inherit pname version dotnet-sdk dotnet-runtime;
           name = "WoofWare.Myriad.Plugins";
