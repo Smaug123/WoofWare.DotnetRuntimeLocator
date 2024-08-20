@@ -185,7 +185,7 @@ jobs:
     needs: [check-dotnet-format, check-nix-format, build, build-nix, linkcheck, flake-check, nuget-pack, expected-pack, github-release-dry-run, build-windows]
     runs-on: ubuntu-latest
     steps:
-      - uses: Smaug123/all-required-checks-complete-action@7f00e93876ff088216da11c52e3f83a13ca5bf55
+      - uses: Smaug123/all-required-checks-complete-action@c8f09fcdca5f03fc574af26064ab80982437466b
 
   attestation:
     runs-on: ubuntu-latest
