@@ -50,7 +50,7 @@
           src = ./.;
           projectFile = "./WoofWare.DotnetRuntimeLocator/WoofWare.DotnetRuntimeLocator.csproj";
           testProjectFile = "./WoofWare.DotnetRuntimeLocator/Test/Test.fsproj";
-          nugetDeps = ./nix/deps.nix; # `nix build .#default.passthru.fetch-deps && ./result` and put the result here
+          nugetDeps = ./nix/deps.nix; # `nix build .#default.passthru.fetch-deps && ./result nix/deps.nix`
           doCheck = true;
         };
       };
