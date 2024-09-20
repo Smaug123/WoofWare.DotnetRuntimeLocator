@@ -25,9 +25,7 @@ jobs:
         run: 'nix build ".#default.passthru.fetch-deps"'
 
       - name: Run passthru
-        run: |
-            set -o pipefail
-            ./result nix/deps.nix
+        run: ./result nix/deps.nix
 
       - name: Format
         run: 'nix develop --command alejandra .'
