@@ -4,6 +4,7 @@
   "pathFilters": [
     ":!Test/",
     ":/WoofWare.DotnetRuntimeLocator",
+    ":/global.json",
     ":/Directory.Build.props",
     ":/README.md"
   ]
