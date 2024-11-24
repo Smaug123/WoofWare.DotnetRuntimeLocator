@@ -14,8 +14,8 @@
     flake-utils.lib.eachDefaultSystem (system: let
       pkgs = nixpkgs.legacyPackages.${system};
       pname = "WoofWare.DotnetRuntimeLocator";
-      dotnet-sdk = pkgs.dotnet-sdk_8;
-      dotnet-runtime = pkgs.dotnetCorePackages.runtime_8_0;
+      dotnet-sdk = pkgs.dotnetCorePackages.sdk_9_0;
+      dotnet-runtime = pkgs.dotnetCorePackages.runtime_9_0;
       version = "0.1";
       dotnetTool = dllOverride: toolName: toolVersion: hash:
         pkgs.stdenvNoCC.mkDerivation rec {
@@ -46,7 +46,7 @@
         fantomas = dotnetTool null "fantomas" (builtins.fromJSON (builtins.readFile ./.config/dotnet-tools.json)).tools.fantomas.version (builtins.head (builtins.filter (elem: elem.pname == "fantomas") ((import ./nix/deps.nix) {fetchNuGet = x: x;}))).hash;
         default = pkgs.buildDotnetModule {
           inherit pname version dotnet-sdk dotnet-runtime;
-          name = "WoofWare.Myriad.Plugins";
+          name = "WoofWare.DotnetRuntimeLocator";
           src = ./.;
           projectFile = "./WoofWare.DotnetRuntimeLocator/WoofWare.DotnetRuntimeLocator.csproj";
           testProjectFile = "./WoofWare.DotnetRuntimeLocator/Test/Test.fsproj";
