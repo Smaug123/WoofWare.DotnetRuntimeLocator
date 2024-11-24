@@ -2,7 +2,7 @@
   "version": "0.1",
   "publicReleaseRefSpec": ["^refs/heads/main$"],
   "pathFilters": [
-    "^Test/",
+    ":!Test/",
     ":/WoofWare.DotnetRuntimeLocator",
     ":/Directory.Build.props",
     ":/README.md"
