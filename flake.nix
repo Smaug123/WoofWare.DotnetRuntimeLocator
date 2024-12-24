@@ -42,11 +42,9 @@
           '';
         };
     in {
-      packages =
-      let
+      packages = let
         deps = builtins.fromJSON (builtins.readFile ./nix/deps.json);
-      in
-      {
+      in {
         fantomas = dotnetTool null "fantomas" (builtins.fromJSON (builtins.readFile ./.config/dotnet-tools.json)).tools.fantomas.version (builtins.head (builtins.filter (elem: elem.pname == "fantomas") deps)).hash;
         default = pkgs.buildDotnetModule {
           inherit pname version dotnet-sdk dotnet-runtime;
