@@ -25,7 +25,7 @@ jobs:
         run: 'nix build ".#default.fetch-deps"'
 
       - name: Run fetch-deps
-        run: ./result nix/deps.nix
+        run: ./result nix/deps.json
 
       - name: Format
         run: 'nix develop --command alejandra .'
