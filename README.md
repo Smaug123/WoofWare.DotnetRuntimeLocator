@@ -20,4 +20,6 @@ The easiest way to make sure we can find a `dotnet` is to have one on your PATH.
 If you have a *very* strange setup, we may be unable to locate the `libhostfxr` library we use to find the runtimes.
 In that case, you can supply the environment variable `WOOFWARE_DOTNET_LOCATOR_LIBHOSTFXR`,
 which should be a full path to a `libhostfxr` DLL on your system.
-(Normally this is in `/usr/share/dotnet/host/fxr/{runtime}/libhostfxr.so`; you must make sure your version is from runtime 6 or greater, because the required symbols were not added until then.)
+(Normally this is in `/usr/share/dotnet/host/fxr/{runtime}/libhostfxr.so`;
+you must make sure your version is from runtime 6 or greater,
+because the required symbols were not added until then.)

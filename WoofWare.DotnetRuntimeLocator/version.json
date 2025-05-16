@@ -1,6 +1,8 @@
 {
-  "version": "0.1",
-  "publicReleaseRefSpec": ["^refs/heads/main$"],
+  "version": "0.2",
+  "publicReleaseRefSpec": [
+    "^refs/heads/main$"
+  ],
   "pathFilters": [
     ":!Test/",
     ":/WoofWare.DotnetRuntimeLocator",
