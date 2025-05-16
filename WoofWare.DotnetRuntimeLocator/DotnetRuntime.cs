@@ -2,22 +2,23 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text.Json;
 
 namespace WoofWare.DotnetRuntimeLocator;
 
 /// <summary>
-/// The result of a call to `DotnetRuntime.Select`.
-/// This is `type DotnetRuntimeSelection = | Framework of DotnetEnvironmentFrameworkInfo | Sdk of DotnetEnvironmentSdkInfo | Absent`.
+///     The result of a call to `DotnetRuntime.Select`.
+///     This is `type DotnetRuntimeSelection = | Framework of DotnetEnvironmentFrameworkInfo | Sdk of
+///     DotnetEnvironmentSdkInfo | Absent`.
 /// </summary>
 internal class DotnetRuntimeSelection
 {
+    private readonly int _discriminator;
     private readonly DotnetEnvironmentFrameworkInfo? _framework;
     private readonly DotnetEnvironmentSdkInfo? _sdk;
 
-    private readonly int _discriminator;
-
     /// <summary>
-    /// The constructor which means "We found the right runtime, and it's from this framework".
+    ///     The constructor which means "We found the right runtime, and it's from this framework".
     /// </summary>
     /// <param name="framework">For example, </param>
     public DotnetRuntimeSelection(DotnetEnvironmentFrameworkInfo framework)
@@ -27,7 +28,7 @@ internal class DotnetRuntimeSelection
     }
 
     /// <summary>
-    /// The constructor which means "We found the right runtime, and it's from this SDK".
+    ///     The constructor which means "We found the right runtime, and it's from this SDK".
     /// </summary>
     /// <param name="sdk">For example, </param>
     public DotnetRuntimeSelection(DotnetEnvironmentSdkInfo sdk)
@@ -37,7 +38,7 @@ internal class DotnetRuntimeSelection
     }
 
     /// <summary>
-    /// The constructor which means "We were unable to find an appropriate runtime".
+    ///     The constructor which means "We were unable to find an appropriate runtime".
     /// </summary>
     public DotnetRuntimeSelection()
     {
@@ -45,7 +46,7 @@ internal class DotnetRuntimeSelection
     }
 
     /// <summary>
-    /// Exhaustive match on this discriminated union.
+    ///     Exhaustive match on this discriminated union.
     /// </summary>
     /// <param name="withFramework">If `this` is a `Framework`, call this continuation with its value.</param>
     /// <param name="withSdk">If `this` is a `Sdk`, call this continuation with its value.</param>
@@ -66,19 +67,15 @@ internal class DotnetRuntimeSelection
 }
 
 /// <summary>
-/// Module to hold methods for automatically identifying a .NET runtime.
+///     Module to hold methods for automatically identifying a .NET runtime.
 /// </summary>
 public static class DotnetRuntime
 {
-    private record RuntimeOnDisk(
-        Version Desired,
-        string Name,
-        DotnetEnvironmentFrameworkInfo Installed,
-        Version InstalledVersion);
-
-    private static DotnetRuntimeSelection SelectRuntime(RuntimeOptions options, DotnetEnvironmentInfo env)
+    /// <returns>For each requested runtime in the RuntimeOptions, the resolved place in which to find that runtime.</returns>
+    private static IReadOnlyDictionary<string, DotnetRuntimeSelection> SelectRuntime(RuntimeOptions options,
+        DotnetEnvironmentInfo env)
     {
-        string? rollForwardEnvVar = Environment.GetEnvironmentVariable("DOTNET_ROLL_FORWARD");
+        var rollForwardEnvVar = Environment.GetEnvironmentVariable("DOTNET_ROLL_FORWARD");
         RollForward rollForward;
         if (rollForwardEnvVar == null)
         {
@@ -87,71 +84,171 @@ public static class DotnetRuntime
         else
         {
             if (!Enum.TryParse(rollForwardEnvVar, out rollForward))
-            {
                 throw new ArgumentException(
                     $"Unable to parse the value of environment variable DOTNET_ROLL_FORWARD, which was: {rollForwardEnvVar}");
-            }
         }
 
-        IReadOnlyList<(Version, string)> desiredVersions;
+        IReadOnlyDictionary<string, Version> desiredVersions;
         if (options.IncludedFrameworks == null)
         {
             if (options.Framework == null)
             {
                 if (options.Frameworks == null)
-                {
                     throw new InvalidDataException(
                         "Expected runtimeconfig.json file to have either a framework or frameworks entry, but it had neither");
-                }
 
-                desiredVersions = options.Frameworks.Select(x => (new Version(x.Version), x.Name)).ToList();
+                desiredVersions = options.Frameworks.Select(x => (x.Name, new Version(x.Version))).GroupBy(x => x.Name)
+                    .Select(data =>
+                    {
+                        var versions = (IReadOnlyList<Version>)data.Select(datum => datum.Item2).ToList();
+                        if (versions.Count != 1)
+                        {
+                            var description = string.Join(", ", versions.Select(x => x.ToString()));
+                            throw new InvalidDataException(
+                                $"Unexpectedly had not-exactly-one version desired for framework {data.Key}: {description}");
+                        }
+
+                        return (data.Key, versions[0]);
+                    })
+                    .ToDictionary();
             }
             else
             {
-                desiredVersions = [(new Version(options.Framework.Version), options.Framework.Name)];
+                var result = new Dictionary<string, Version>
+                    { { options.Framework.Name, new Version(options.Framework.Version) } };
+                desiredVersions = result;
             }
         }
         else
         {
-            desiredVersions = options.IncludedFrameworks.Select(x => (new Version(x.Version), x.Name)).ToList();
+            desiredVersions = options.IncludedFrameworks.Select(x => (x.Name, new Version(x.Version)))
+                .GroupBy(x => x.Name)
+                .Select(data =>
+                {
+                    var versions = (IReadOnlyList<Version>)data.Select(datum => datum.Item2).ToList();
+                    if (versions.Count != 1)
+                    {
+                        var description = string.Join(", ", versions.Select(x => x.ToString()));
+                        throw new InvalidDataException(
+                            $"Unexpectedly had not-exactly-one version desired for framework {data.Key}: {description}");
+                    }
+
+                    return (data.Key, versions[0]);
+                })
+                .ToDictionary();
         }
 
-        IReadOnlyList<RuntimeOnDisk> compatiblyNamedRuntimes = env.Frameworks.SelectMany(availableFramework =>
-            desiredVersions.Where(desired => desired.Item2 == availableFramework.Name)
-                .Select(desired => new RuntimeOnDisk(desired.Item1, desired.Item2,
-                    availableFramework, new Version(availableFramework.Version)))
-        ).ToList();
+        IReadOnlyDictionary<string, IReadOnlyList<RuntimeOnDisk>> availableRuntimes = env
+            .Frameworks.SelectMany(availableFramework =>
+            {
+                var availableVersion = new Version(availableFramework.Version);
+                if (!desiredVersions.TryGetValue(availableFramework.Name, out var desiredVersion))
+                {
+                    // we don't desire this framework at any version; skip it
+                    return [];
+                }
+
+                if (availableVersion < desiredVersion)
+                {
+                    // It's never desired to roll *backward*.
+                    return [];
+                }
+                return new List<(string, DotnetEnvironmentFrameworkInfo)>
+                    { (availableFramework.Name, availableFramework) };
+            }).GroupBy(x => x.Item1)
+            .Select(group =>
+            {
+                var grouping = group.Select(x => new RuntimeOnDisk(x.Item2, new Version(x.Item2.Version))).ToList();
+                return (group.Key, (IReadOnlyList<RuntimeOnDisk>)grouping);
+            })
+            .ToDictionary();
 
         switch (rollForward)
         {
             case RollForward.Minor:
             {
-                (string, RuntimeOnDisk)? available =
-                    compatiblyNamedRuntimes
-                        .Where(data =>
-                            data.InstalledVersion.Major == data.Desired.Major &&
-                            data.InstalledVersion.Minor >= data.Desired.Minor).GroupBy(data => data.Name).Select((
-                                data) =>
-                            (data.Key,
-                                data.MinBy(runtimeOnDisk => (runtimeOnDisk.InstalledVersion.Minor,
-                                    runtimeOnDisk.InstalledVersion.Build))!)
-                        )
-                        // TODO: how do we select between many available frameworks?
-                        .FirstOrDefault();
-                return available == null
-                    ?
-                    // TODO: maybe we can ask the SDK. But we keep on trucking: maybe we're self-contained,
-                    // and we'll actually find all the runtime next to the DLL.
-                    new DotnetRuntimeSelection()
-                    : new DotnetRuntimeSelection(available.Value.Item2.Installed);
+                return desiredVersions.Select(desired =>
+                {
+                    if (!availableRuntimes.TryGetValue(desired.Key, out var available))
+                    {
+                        return (desired.Key, new DotnetRuntimeSelection());
+                    }
+
+                    if (ReferenceEquals(available, null))
+                    {
+                        throw new NullReferenceException("logic error: contents of non-nullable dict can't be null");
+                    }
+
+                    // If there's a correct major and minor version, take the latest patch.
+                    var correctMajorAndMinorVersion =
+                        available.Where(data =>
+                            data.InstalledVersion.Major == desired.Value.Major &&
+                            data.InstalledVersion.Minor == desired.Value.Minor).ToList();
+                    if (correctMajorAndMinorVersion.Count > 0)
+                    {
+                        return (desired.Key, new DotnetRuntimeSelection(correctMajorAndMinorVersion.MaxBy(v => v.InstalledVersion)!.Installed));
+                    }
+
+                    // Otherwise roll forward to lowest higher minor version
+                    var candidate = available.Where(data => data.InstalledVersion.Major == desired.Value.Major)
+                        .MinBy(v => (v.InstalledVersion.Minor, -v.InstalledVersion.Build));
+
+                    return (desired.Key, candidate == null ? new DotnetRuntimeSelection() : new DotnetRuntimeSelection(candidate.Installed));
+                }).ToDictionary();
             }
             case RollForward.Major:
-            case RollForward.LatestPatch:
-            case RollForward.LatestMinor:
-            case RollForward.LatestMajor:
-            case RollForward.Disable:
             {
                 throw new NotImplementedException();
+            }
+            case RollForward.LatestPatch:
+            {
+                return desiredVersions.Select(desired =>
+                {
+                    var matches = availableRuntimes[desired.Key]
+                        .Where(data =>
+                            data.InstalledVersion.Minor == desired.Value.Minor &&
+                            data.InstalledVersion.Major == desired.Value.Major).MaxBy(data => data.InstalledVersion);
+                    return matches == null
+                        ? (desired.Key, new DotnetRuntimeSelection())
+                        : (desired.Key, new DotnetRuntimeSelection(matches.Installed));
+                }).ToDictionary();
+            }
+            case RollForward.LatestMinor:
+            {
+                return desiredVersions.Select(desired =>
+                {
+                    var matches = availableRuntimes[desired.Key]
+                        .Where(data =>
+                            data.InstalledVersion.Major == desired.Value.Major).MaxBy(data => data.InstalledVersion);
+                    return matches == null
+                        ? (desired.Key, new DotnetRuntimeSelection())
+                        : (desired.Key, new DotnetRuntimeSelection(matches.Installed));
+                }).ToDictionary();
+            }
+            case RollForward.LatestMajor:
+            {
+                return desiredVersions.Select(desired =>
+                {
+                    var match = availableRuntimes[desired.Key].MaxBy(data => data.InstalledVersion);
+                    return match == null ? (desired.Key, new DotnetRuntimeSelection()) : (desired.Key, new DotnetRuntimeSelection(match.Installed));
+                }).ToDictionary();
+            }
+            case RollForward.Disable:
+            {
+                return desiredVersions.Select(desired =>
+                    {
+                        var exactMatch = availableRuntimes[desired.Key]
+                            .FirstOrDefault(available => available.InstalledVersion == desired.Value);
+                        if (exactMatch != null)
+                        {
+                            return (desired.Key, new DotnetRuntimeSelection(exactMatch.Installed));
+                        }
+                        else
+                        {
+                            return (desired.Key, new DotnetRuntimeSelection());
+                        }
+                    }
+                ).ToDictionary();
             }
             default:
             {
@@ -161,44 +258,50 @@ public static class DotnetRuntime
     }
 
     /// <summary>
-    /// Given a .NET executable DLL, identify the most appropriate .NET runtime to run it.
-    ///
-    /// This is pretty half-baked at the moment; test this yourself to make sure it does what you want it to!
+    ///     Given a .NET executable DLL, identify the most appropriate .NET runtime to run it.
+    ///     This is pretty half-baked at the moment; test this yourself to make sure it does what you want it to!
     /// </summary>
     /// <param name="dllPath">Path to an OutputType=Exe .dll file.</param>
-    /// <param name="dotnet">Path to the `dotnet` binary which you would use e.g. in `dotnet exec` to run the DLL specified by `dllPath`.</param>
-    /// <returns>An ordered collection of folder paths. When resolving any particular DLL during the execution of the input DLL, search these folders; if a DLL name appears in multiple of these folders, the earliest is correct for that DLL.</returns>
+    /// <param name="dotnet">
+    ///     Path to the `dotnet` binary which you would use e.g. in `dotnet exec` to run the DLL specified by
+    ///     `dllPath`.
+    /// </param>
+    /// <returns>
+    ///     An ordered collection of folder paths. When resolving any particular DLL during the execution of the input
+    ///     DLL, search these folders; if a DLL name appears in multiple of these folders, the earliest is correct for that
+    ///     DLL.
+    /// </returns>
     public static IReadOnlyList<string> SelectForDll(string dllPath, string? dotnet = null)
     {
         if (!dllPath.EndsWith(".dll", StringComparison.Ordinal))
-        {
             throw new ArgumentException(
                 $"SelectForDll requires the input DLL to have the extension '.dll'; provided: {dllPath}");
-        }
 
         var dll = new FileInfo(dllPath);
         var dllParentDir = dll.Directory ?? throw new ArgumentException($"dll path {dllPath} had no parent");
-        string name = dll.Name.Substring(0, dll.Name.Length - ".dll".Length);
+        var name = dll.Name.Substring(0, dll.Name.Length - ".dll".Length);
 
-        string configFilePath = Path.Combine(dllParentDir.FullName, $"{name}.runtimeconfig.json");
+        var configFilePath = Path.Combine(dllParentDir.FullName, $"{name}.runtimeconfig.json");
 
         // It appears to be undocumented why this returns a nullable, and the Rider decompiler doesn't suggest there are
         // any code paths where it can return null?
-        RuntimeConfig runtimeConfig =
-            System.Text.Json.JsonSerializer.Deserialize<RuntimeConfig>(File.ReadAllText(configFilePath)) ??
+        var runtimeConfig =
+            JsonSerializer.Deserialize<RuntimeConfig>(File.ReadAllText(configFilePath)) ??
             throw new NullReferenceException($"Failed to parse contents of file {configFilePath} as a runtime config");
 
-        DotnetEnvironmentInfo availableRuntimes = dotnet == null
+        var availableRuntimes = dotnet == null
             ? DotnetEnvironmentInfo.Get()
             : DotnetEnvironmentInfo.GetSpecific(new FileInfo(dotnet));
 
-        var runtime = SelectRuntime(runtimeConfig.RuntimeOptions, availableRuntimes);
+        var runtimes = SelectRuntime(runtimeConfig.RuntimeOptions, availableRuntimes);
 
-        return runtime.Visit(framework => new[] {dllParentDir.FullName, $"{framework.Path}/{framework.Version}"},
-            sdk => [dllParentDir.FullName, sdk.Path],
-            () =>
-                // Keep on trucking: let's be optimistic and hope that we're self-contained.
-                [dllParentDir.FullName]
-            );
+        return runtimes.SelectMany(runtime => runtime.Value.Visit(framework => new[] { $"{framework.Path}/{framework.Version}" },
+            sdk => [sdk.Path],
+            () => []
+        )).Prepend(dllParentDir.FullName).ToList();
     }
+
+    private record RuntimeOnDisk(
+        DotnetEnvironmentFrameworkInfo Installed,
+        Version InstalledVersion);
 }
