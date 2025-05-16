@@ -86,7 +86,10 @@ public record DotnetEnvironmentInfo(
     private static unsafe DotnetEnvironmentInfo CallDelegate(string? dotnetExePath, RuntimeDelegate f)
     {
         byte[]? dotnet = null;
-        if (dotnetExePath != null) dotnet = Encoding.ASCII.GetBytes(dotnetExePath);
+        if (dotnetExePath != null)
+        {
+            dotnet = Encoding.ASCII.GetBytes(dotnetExePath);
+        }
         fixed (byte* dotnetPath = dotnet)
         {
             DotnetEnvironmentInfo? toRet = null;
@@ -135,7 +138,8 @@ public record DotnetEnvironmentInfo(
             {
                 var dotnetNoSymlinks = ResolveAllSymlinks(dotnetExe);
                 var parent = dotnetNoSymlinks.Directory;
-                if (parent != null) {
+                if (parent != null)
+                {
                     dotnetParent = parent.FullName;
                 }
             }
@@ -164,7 +168,8 @@ public record DotnetEnvironmentInfo(
     private static FileInfo? LocateDotnetExe()
     {
         var path = Environment.GetEnvironmentVariable("PATH");
-        if (path != null) {
+        if (path != null)
+        {
             foreach (var component in path.Split(':'))
             {
                 var dotnet = Path.Combine(component, "dotnet");
