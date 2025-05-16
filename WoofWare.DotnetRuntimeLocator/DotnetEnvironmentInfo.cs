@@ -188,7 +188,11 @@ public record DotnetEnvironmentInfo(
     /// <exception cref="Exception">Throws on any failure; handles nothing gracefully.</exception>
     public static DotnetEnvironmentInfo Get()
     {
-        var dotnetExe = LocateDotnetExe();
+        var dotnetExe = Environment.GetEnvironmentVariable("WOOFWARE_DOTNET_LOCATOR_DOTNET_EXE") switch
+        {
+            null => LocateDotnetExe(),
+            var s => new FileInfo(s)
+        };
 
         // `null` can happen! Maybe we're self-contained.
         return GetSpecific(dotnetExe);
