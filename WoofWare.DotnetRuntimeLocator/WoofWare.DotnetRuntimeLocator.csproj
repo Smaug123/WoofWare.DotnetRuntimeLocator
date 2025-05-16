@@ -23,6 +23,7 @@
     <Compile Include="DotnetEnvironmentFrameworkInfo.cs"/>
     <Compile Include="DotnetEnvironmentInfo.cs"/>
     <Compile Include="DotnetEnvironmentSdkInfo.cs"/>
+    <Compile Include="DotnetRuntime.cs" />
     <Compile Include="InteropStructs.cs"/>
     <Compile Include="Boilerplate.cs"/>
     <Compile Include="RuntimeConfigOptions.cs"/>

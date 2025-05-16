@@ -8,6 +8,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="TestDotnetRuntime.fs" />
     <Compile Include="TestRuntimeConfigParse.fs"/>
     <Compile Include="TestSurface.fs"/>
     <Compile Include="TestDotnetEnvironmentInfo.fs"/>

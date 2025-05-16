@@ -18,6 +18,6 @@ module TestSurface =
     let ``Ensure public API is fully documented`` () =
         DocCoverage.assertFullyDocumented assembly
 
-    [<Test ; Explicit "Not yet published">]
+    [<Test>]
     let ``Ensure version is monotonic`` () =
         MonotonicVersion.validate assembly "WoofWare.DotnetRuntimeLocator"
