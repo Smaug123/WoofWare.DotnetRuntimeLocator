@@ -57,10 +57,14 @@ jobs:
       run: nix develop --command dotnet build --no-restore --configuration ${{matrix.config}}
     - name: Test
       run: nix develop --command dotnet test --no-build --verbosity normal --configuration ${{matrix.config}}
-    - name: Publish example
-      run: nix develop --command dotnet publish --no-build --verbosity normal --configuration ${{matrix.config}} Example
+    - name: Publish example self-contained
+      run: nix develop --command dotnet publish --self-contained --no-build --verbosity normal --configuration ${{matrix.config}} Example
     - name: Run example self-contained
-      run: "./Example/bin/${{matrix.config}}/*/*/Example"
+      run: "./Example/bin/${{matrix.config}}/net*/*-*/Example"
+    - name: Publish example non-self-contained
+      run: nix develop --command dotnet publish --no-build --verbosity normal --configuration ${{matrix.config}} Example
+    - name: Run example non-self-contained
+      run: "./Example/bin/${{matrix.config}}/net*/Example"
 
   build-nix:
     runs-on: ubuntu-latest

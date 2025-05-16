@@ -94,19 +94,26 @@ public static class DotnetRuntime
         }
 
         IReadOnlyList<(Version, string)> desiredVersions;
-        if (options.Framework == null)
+        if (options.IncludedFrameworks == null)
         {
-            if (options.Frameworks == null)
+            if (options.Framework == null)
             {
-                throw new InvalidDataException(
-                    "Expected runtimeconfig.json file to have either a framework or frameworks entry, but it had neither");
-            }
+                if (options.Frameworks == null)
+                {
+                    throw new InvalidDataException(
+                        "Expected runtimeconfig.json file to have either a framework or frameworks entry, but it had neither");
+                }
 
-            desiredVersions = options.Frameworks.Select(x => (new Version(x.Version), x.Name)).ToList();
+                desiredVersions = options.Frameworks.Select(x => (new Version(x.Version), x.Name)).ToList();
+            }
+            else
+            {
+                desiredVersions = [(new Version(options.Framework.Version), options.Framework.Name)];
+            }
         }
         else
         {
-            desiredVersions = [(new Version(options.Framework.Version), options.Framework.Name)];
+            desiredVersions = options.IncludedFrameworks.Select(x => (new Version(x.Version), x.Name)).ToList();
         }
 
         IReadOnlyList<RuntimeOnDisk> compatiblyNamedRuntimes = env.Frameworks.SelectMany(availableFramework =>
