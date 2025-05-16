@@ -31,7 +31,7 @@ jobs:
     - name: Publish
       run: dotnet publish Example
     - name: Run example
-      run: ".\\Example\\bin\\Release\\net8.0\\win-x64\\Example.exe"
+      run: ".\\Example\\bin\\Release\\net8.0\\Example.exe"
 
   build:
     strategy:
