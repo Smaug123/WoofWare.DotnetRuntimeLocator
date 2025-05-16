@@ -86,10 +86,7 @@ public record DotnetEnvironmentInfo(
     private static unsafe DotnetEnvironmentInfo CallDelegate(string? dotnetExePath, RuntimeDelegate f)
     {
         byte[]? dotnet = null;
-        if (dotnetExePath != null)
-        {
-            dotnet = Encoding.ASCII.GetBytes(dotnetExePath);
-        }
+        if (dotnetExePath != null) dotnet = Encoding.ASCII.GetBytes(dotnetExePath);
         fixed (byte* dotnetPath = dotnet)
         {
             DotnetEnvironmentInfo? toRet = null;
@@ -117,7 +114,10 @@ public record DotnetEnvironmentInfo(
     /// <summary>
     ///     Get the environment information that is available to the specified `dotnet` executable.
     /// </summary>
-    /// <param name="dotnetExe">A `dotnet` (or `dotnet.exe`) executable, e.g. one from /usr/bin/dotnet. Set this to null if you want us to just do our best.</param>
+    /// <param name="dotnetExe">
+    ///     A `dotnet` (or `dotnet.exe`) executable, e.g. one from /usr/bin/dotnet. Set this to null if you
+    ///     want us to just do our best.
+    /// </param>
     /// <returns>Information about the environment available to the given executable.</returns>
     /// <exception cref="Exception">Throws on any failure; handles nothing gracefully.</exception>
     public static DotnetEnvironmentInfo GetSpecific(FileInfo? dotnetExe)
@@ -135,11 +135,9 @@ public record DotnetEnvironmentInfo(
             {
                 var dotnetNoSymlinks = ResolveAllSymlinks(dotnetExe);
                 var parent = dotnetNoSymlinks.Directory;
-                if (parent != null)
-                {
-                    dotnetParent = parent.FullName;
-                }
+                if (parent != null) dotnetParent = parent.FullName;
             }
+
             return CallDelegate(dotnetParent, f);
         }
         finally
@@ -165,16 +163,11 @@ public record DotnetEnvironmentInfo(
     {
         var path = Environment.GetEnvironmentVariable("PATH");
         if (path != null)
-        {
             foreach (var component in path.Split(':'))
             {
                 var dotnet = Path.Combine(component, "dotnet");
-                if (File.Exists(dotnet))
-                {
-                    return new FileInfo(dotnet);
-                }
+                if (File.Exists(dotnet)) return new FileInfo(dotnet);
             }
-        }
 
         var renv = RuntimeEnvironment.GetRuntimeDirectory();
         return FindDotnetAbove(new DirectoryInfo(renv));
