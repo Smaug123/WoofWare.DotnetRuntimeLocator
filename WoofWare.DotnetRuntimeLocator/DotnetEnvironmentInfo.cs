@@ -135,7 +135,9 @@ public record DotnetEnvironmentInfo(
             {
                 var dotnetNoSymlinks = ResolveAllSymlinks(dotnetExe);
                 var parent = dotnetNoSymlinks.Directory;
-                if (parent != null) dotnetParent = parent.FullName;
+                if (parent != null) {
+                    dotnetParent = parent.FullName;
+                }
             }
 
             return CallDelegate(dotnetParent, f);
@@ -162,12 +164,13 @@ public record DotnetEnvironmentInfo(
     private static FileInfo? LocateDotnetExe()
     {
         var path = Environment.GetEnvironmentVariable("PATH");
-        if (path != null)
+        if (path != null) {
             foreach (var component in path.Split(':'))
             {
                 var dotnet = Path.Combine(component, "dotnet");
                 if (File.Exists(dotnet)) return new FileInfo(dotnet);
             }
+        }
 
         var renv = RuntimeEnvironment.GetRuntimeDirectory();
         return FindDotnetAbove(new DirectoryInfo(renv));
