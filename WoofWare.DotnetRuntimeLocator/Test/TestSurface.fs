@@ -19,5 +19,6 @@ module TestSurface =
         DocCoverage.assertFullyDocumented assembly
 
     [<Test>]
-    let ``Ensure version is monotonic`` () =
+    // https://github.com/nunit/nunit3-vs-adapter/issues/876
+    let ``EnsureVersionIsMonotonic`` () =
         MonotonicVersion.validate assembly "WoofWare.DotnetRuntimeLocator"
