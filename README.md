@@ -11,6 +11,11 @@ See [the example](Example/Program.fs).
 let info = DotnetEnvironmentInfo.Get ()
 // or, if you already know a path to the `dotnet` executable...
 let info = DotnetEnvironmentInfo.GetSpecific "/path/to/dotnet"
+
+// identify the directories containing the framework which would execute a given DLL
+let dirsToSearch : string seq = DotnetRuntime.SelectForDll "/path/to/dll.dll"
+// or, if you would be running with a specific `/path/to/dotnet exec /path/to/dll.dll`:
+let dirsToSearch : string seq = DotnetRuntime.SelectForDll ("/path/to/dll.dll", "/path/to/dotnet")
 ```
 
 ## Troubleshooting

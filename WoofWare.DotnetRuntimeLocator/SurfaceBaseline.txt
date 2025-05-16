@@ -45,6 +45,8 @@ WoofWare.DotnetRuntimeLocator.DotnetEnvironmentSdkInfo.Path [property]: string
 WoofWare.DotnetRuntimeLocator.DotnetEnvironmentSdkInfo.set_Path [method]: string -> unit
 WoofWare.DotnetRuntimeLocator.DotnetEnvironmentSdkInfo.set_Version [method]: string -> unit
 WoofWare.DotnetRuntimeLocator.DotnetEnvironmentSdkInfo.Version [property]: string
+WoofWare.DotnetRuntimeLocator.DotnetRuntime inherit obj
+WoofWare.DotnetRuntimeLocator.DotnetRuntime.SelectForDll [static method]: (string, string) -> string System.Collections.Generic.IReadOnlyList
 WoofWare.DotnetRuntimeLocator.RollForward inherit System.Enum
 WoofWare.DotnetRuntimeLocator.RollForward.Disable [static field]: WoofWare.DotnetRuntimeLocator.RollForward = Disable
 WoofWare.DotnetRuntimeLocator.RollForward.LatestMajor [static field]: WoofWare.DotnetRuntimeLocator.RollForward = LatestMajor
@@ -79,13 +81,16 @@ WoofWare.DotnetRuntimeLocator.RuntimeOptions.Framework [property]: WoofWare.Dotn
 WoofWare.DotnetRuntimeLocator.RuntimeOptions.Frameworks [property]: WoofWare.DotnetRuntimeLocator.RuntimeConfigFramework System.Collections.Generic.IReadOnlyList
 WoofWare.DotnetRuntimeLocator.RuntimeOptions.get_Framework [method]: unit -> WoofWare.DotnetRuntimeLocator.RuntimeConfigFramework
 WoofWare.DotnetRuntimeLocator.RuntimeOptions.get_Frameworks [method]: unit -> WoofWare.DotnetRuntimeLocator.RuntimeConfigFramework System.Collections.Generic.IReadOnlyList
+WoofWare.DotnetRuntimeLocator.RuntimeOptions.get_IncludedFrameworks [method]: unit -> WoofWare.DotnetRuntimeLocator.RuntimeConfigFramework System.Collections.Generic.IReadOnlyList
 WoofWare.DotnetRuntimeLocator.RuntimeOptions.get_RollForward [method]: unit -> WoofWare.DotnetRuntimeLocator.RollForward System.Nullable
 WoofWare.DotnetRuntimeLocator.RuntimeOptions.get_Tfm [method]: unit -> string
+WoofWare.DotnetRuntimeLocator.RuntimeOptions.IncludedFrameworks [property]: WoofWare.DotnetRuntimeLocator.RuntimeConfigFramework System.Collections.Generic.IReadOnlyList
 WoofWare.DotnetRuntimeLocator.RuntimeOptions.op_Equality [static method]: (WoofWare.DotnetRuntimeLocator.RuntimeOptions, WoofWare.DotnetRuntimeLocator.RuntimeOptions) -> bool
 WoofWare.DotnetRuntimeLocator.RuntimeOptions.op_Inequality [static method]: (WoofWare.DotnetRuntimeLocator.RuntimeOptions, WoofWare.DotnetRuntimeLocator.RuntimeOptions) -> bool
 WoofWare.DotnetRuntimeLocator.RuntimeOptions.RollForward [property]: WoofWare.DotnetRuntimeLocator.RollForward System.Nullable
 WoofWare.DotnetRuntimeLocator.RuntimeOptions.set_Framework [method]: WoofWare.DotnetRuntimeLocator.RuntimeConfigFramework -> unit
 WoofWare.DotnetRuntimeLocator.RuntimeOptions.set_Frameworks [method]: WoofWare.DotnetRuntimeLocator.RuntimeConfigFramework System.Collections.Generic.IReadOnlyList -> unit
+WoofWare.DotnetRuntimeLocator.RuntimeOptions.set_IncludedFrameworks [method]: WoofWare.DotnetRuntimeLocator.RuntimeConfigFramework System.Collections.Generic.IReadOnlyList -> unit
 WoofWare.DotnetRuntimeLocator.RuntimeOptions.set_RollForward [method]: WoofWare.DotnetRuntimeLocator.RollForward System.Nullable -> unit
 WoofWare.DotnetRuntimeLocator.RuntimeOptions.set_Tfm [method]: string -> unit
 WoofWare.DotnetRuntimeLocator.RuntimeOptions.Tfm [property]: string

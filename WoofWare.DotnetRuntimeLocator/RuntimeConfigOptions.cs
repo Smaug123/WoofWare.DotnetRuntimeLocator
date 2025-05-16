@@ -87,6 +87,12 @@ public record RuntimeOptions
     public IReadOnlyList<RuntimeConfigFramework>? Frameworks { get; init; }
 
     /// <summary>
+    ///     This is a self-contained executable which has these framework entirely contained next to it.
+    /// </summary>
+    [JsonPropertyName("includedFrameworks")]
+    public IReadOnlyList<RuntimeConfigFramework>? IncludedFrameworks { get; init; }
+
+    /// <summary>
     ///     This application advertises that it's fine with running under this roll-forward.
     /// </summary>
     [JsonPropertyName("rollForward")]

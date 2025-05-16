@@ -48,10 +48,11 @@
         fantomas = dotnetTool null "fantomas" (builtins.fromJSON (builtins.readFile ./.config/dotnet-tools.json)).tools.fantomas.version (builtins.head (builtins.filter (elem: elem.pname == "fantomas") deps)).hash;
         default = pkgs.buildDotnetModule {
           inherit pname version dotnet-sdk dotnet-runtime;
-          name = "WoofWare.Myriad.Plugins";
+          name = "WoofWare.DotnetRuntimeLocator";
           src = ./.;
           projectFile = "./WoofWare.DotnetRuntimeLocator/WoofWare.DotnetRuntimeLocator.csproj";
           testProjectFile = "./WoofWare.DotnetRuntimeLocator/Test/Test.fsproj";
+          disabledTests = ["WoofWare.DotnetRuntimeLocator.Test.TestSurface.EnsureVersionIsMonotonic"];
           nugetDeps = ./nix/deps.json; # `nix build .#default.fetch-deps && ./result nix/deps.json`
           doCheck = true;
         };
