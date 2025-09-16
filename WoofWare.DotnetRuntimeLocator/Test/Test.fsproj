@@ -8,10 +8,12 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="Assembly.fs" />
     <Compile Include="TestDotnetRuntime.fs" />
     <Compile Include="TestRuntimeConfigParse.fs"/>
     <Compile Include="TestSurface.fs"/>
     <Compile Include="TestDotnetEnvironmentInfo.fs"/>
+    <EmbeddedResource Include="runtimeconfig1.json" />
   </ItemGroup>
 
   <ItemGroup>

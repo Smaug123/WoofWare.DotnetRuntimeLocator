@@ -30,3 +30,20 @@ module TestRuntimeConfigParse =
             )
 
         actual |> shouldEqual expected
+
+    [<Test>]
+    let ``Example 1`` () =
+        let content =
+            Assembly.getEmbeddedResource (Assembly.GetExecutingAssembly ()) "runtimeconfig1.json"
+
+        let expected =
+            RuntimeConfig (
+                RuntimeOptions =
+                    RuntimeOptions (
+                        Tfm = "net8.0",
+                        RollForward = RollForward.Major,
+                        Framework = RuntimeConfigFramework (Name = "Microsoft.NETCore.App", Version = "8.0.0")
+                    )
+            )
+
+        DotnetRuntime.DeserializeRuntimeConfig content |> shouldEqual expected

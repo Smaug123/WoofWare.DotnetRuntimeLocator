@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace WoofWare.DotnetRuntimeLocator;
 
@@ -257,6 +258,18 @@ public static class DotnetRuntime
         }
     }
 
+    private static JsonSerializerOptions _options = new() {PropertyNameCaseInsensitive = true, Converters = { new JsonStringEnumConverter<RollForward>() }};
+
+    /// <summary>
+    /// Parse a runtimeconfig.json file.
+    /// </summary>
+    /// <param name="contents">Contents of the runtimeconfig.json file to parse.</param>
+    /// <exception cref="NullReferenceException">I think this can't happen, but the docs suggest that deserialization might return null.</exception>
+    public static RuntimeConfig? DeserializeRuntimeConfig(string contents)
+    {
+        return JsonSerializer.Deserialize<RuntimeConfig>(contents, _options);
+    }
+
     /// <summary>
     ///     Given a .NET executable DLL, identify the most appropriate .NET runtime to run it.
     ///     This is pretty half-baked at the moment; test this yourself to make sure it does what you want it to!
@@ -285,9 +298,8 @@ public static class DotnetRuntime
 
         // It appears to be undocumented why this returns a nullable, and the Rider decompiler doesn't suggest there are
         // any code paths where it can return null?
-        var runtimeConfig =
-            JsonSerializer.Deserialize<RuntimeConfig>(File.ReadAllText(configFilePath)) ??
-            throw new NullReferenceException($"Failed to parse contents of file {configFilePath} as a runtime config");
+        var contents = File.ReadAllText(configFilePath);
+        var runtimeConfig = DeserializeRuntimeConfig(contents) ?? throw new NullReferenceException($"Failed to parse contents of file {configFilePath} as a runtime config");
 
         var availableRuntimes = dotnet == null
             ? DotnetEnvironmentInfo.Get()
