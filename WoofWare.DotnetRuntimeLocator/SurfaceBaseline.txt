@@ -46,6 +46,7 @@ WoofWare.DotnetRuntimeLocator.DotnetEnvironmentSdkInfo.set_Path [method]: string
 WoofWare.DotnetRuntimeLocator.DotnetEnvironmentSdkInfo.set_Version [method]: string -> unit
 WoofWare.DotnetRuntimeLocator.DotnetEnvironmentSdkInfo.Version [property]: string
 WoofWare.DotnetRuntimeLocator.DotnetRuntime inherit obj
+WoofWare.DotnetRuntimeLocator.DotnetRuntime.DeserializeRuntimeConfig [static method]: string -> WoofWare.DotnetRuntimeLocator.RuntimeConfig
 WoofWare.DotnetRuntimeLocator.DotnetRuntime.SelectForDll [static method]: (string, string) -> string System.Collections.Generic.IReadOnlyList
 WoofWare.DotnetRuntimeLocator.RollForward inherit System.Enum
 WoofWare.DotnetRuntimeLocator.RollForward.Disable [static field]: WoofWare.DotnetRuntimeLocator.RollForward = Disable
