@@ -28,3 +28,7 @@ which should be a full path to a `libhostfxr` DLL on your system.
 (Normally this is in `/usr/share/dotnet/host/fxr/{runtime}/libhostfxr.so`;
 you must make sure your version is from runtime 6 or greater,
 because the required symbols were not added until then.)
+
+# Licence
+
+WoofWare.DotnetRuntimeLocator is licensed to you under the MIT licence, a copy of which can be found at [LICENSE](./LICENSE).
