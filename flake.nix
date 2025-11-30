@@ -14,8 +14,8 @@
     flake-utils.lib.eachDefaultSystem (system: let
       pkgs = nixpkgs.legacyPackages.${system};
       pname = "WoofWare.DotnetRuntimeLocator";
-      dotnet-sdk = pkgs.dotnet-sdk_8;
-      dotnet-runtime = pkgs.dotnetCorePackages.runtime_8_0;
+      dotnet-sdk = pkgs.dotnet-sdk_9;
+      dotnet-runtime = pkgs.dotnetCorePackages.runtime_9_0;
       version = "0.1";
       dotnetTool = dllOverride: toolName: toolVersion: hash:
         pkgs.stdenvNoCC.mkDerivation rec {
