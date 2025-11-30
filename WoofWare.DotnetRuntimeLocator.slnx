@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="Example/Example.fsproj" />
+  <Project Path="WoofWare.DotnetRuntimeLocator/Test/Test.fsproj" />
+  <Project Path="WoofWare.DotnetRuntimeLocator/WoofWare.DotnetRuntimeLocator.csproj" />
+</Solution>
