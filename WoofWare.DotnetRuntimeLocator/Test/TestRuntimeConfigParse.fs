@@ -24,8 +24,8 @@ module TestRuntimeConfigParse =
             RuntimeConfig (
                 RuntimeOptions =
                     RuntimeOptions (
-                        Tfm = "net8.0",
-                        Framework = RuntimeConfigFramework (Name = "Microsoft.NETCore.App", Version = "8.0.0")
+                        Tfm = "net9.0",
+                        Framework = RuntimeConfigFramework (Name = "Microsoft.NETCore.App", Version = "9.0.0")
                     )
             )
 
