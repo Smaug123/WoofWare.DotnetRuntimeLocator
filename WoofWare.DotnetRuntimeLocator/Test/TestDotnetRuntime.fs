@@ -15,7 +15,7 @@ module TestDotnetRuntime =
 
     let inline shouldBeNone (x : 'a option) : unit =
         match x with
-        | Some x -> failwith $"expectd None, but option was Some %O{x}"
+        | Some x -> failwith $"expected None, but option was Some %O{x}"
         | None -> ()
 
     [<Test>]
