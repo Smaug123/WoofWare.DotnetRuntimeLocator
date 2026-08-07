@@ -1,4 +1,8 @@
+using System;
 using System.Collections.Generic;
+using System.Globalization;
+using System.Text;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace WoofWare.DotnetRuntimeLocator;
@@ -63,6 +67,306 @@ public enum RollForward
 }
 
 /// <summary>
+///     Helpers for the "configProperties" section of a runtimeconfig.json file: the runtime knobs which
+///     the .NET host hands to the runtime at process startup, and which managed code reads back through
+///     <c>System.AppContext</c>.
+/// </summary>
+public static class ConfigProperties
+{
+    /// <summary>
+    ///     Render one "configProperties" value the way the .NET host renders it before handing it to the
+    ///     runtime.
+    /// </summary>
+    /// <param name="value">A value from the "configProperties" object of a runtimeconfig.json file.</param>
+    /// <returns>The string the host would place in the runtime's property bag for this value.</returns>
+    /// <remarks>
+    ///     <para>
+    ///         Every value in the runtime's property bag is a string, whatever its JSON type. Managed code
+    ///         calling <c>AppContext.GetData</c> always gets a <see cref="string" /> back, and
+    ///         <c>AppContext.TryGetSwitch</c> works by <c>bool.TryParse</c>-ing that string. So strings are
+    ///         passed through verbatim, and every other JSON value becomes its compact JSON text: <c>true</c>
+    ///         becomes "true", <c>null</c> becomes the four-character string "null", and objects and arrays
+    ///         lose all insignificant whitespace.
+    ///     </para>
+    ///     <para>
+    ///         A string nested inside an array or object is escaped exactly as the host escapes it: only
+    ///         <c>"</c>, <c>\</c> and the C0 control range are escaped, so non-ASCII text, HTML-sensitive
+    ///         characters, U+2028, U+2029 and astral-plane characters all survive as themselves. This is
+    ///         emphatically not what <see cref="Utf8JsonWriter" /> does with any stock encoder, and it was
+    ///         established by measuring a real process rather than by reading the host's source.
+    ///     </para>
+    ///     <para>
+    ///         A value carrying an embedded NUL is cut short at it, because the host hands the runtime
+    ///         null-terminated strings; see <see cref="TruncateAtNul" />. This applies to a top-level
+    ///         string, which is passed through, but not to one nested in an array or object, which is
+    ///         escaped and so cannot contain a NUL by the time it reaches the property bag.
+    ///     </para>
+    ///     <para>
+    ///         What this returns, it returns exactly: there is no case where it renders a value which
+    ///         merely resembles what the host would produce. The price is that it is a partial function.
+    ///         The host puts every number it cannot hold as a 64-bit integer through a double and prints
+    ///         it with rapidjson's dtoa, which is not modelled here, so such a number throws rather than
+    ///         being echoed back and quietly differing — it renders <c>1.50</c> as "1.5", <c>1e3</c> as
+    ///         "1000.0" and <c>18446744073709551616</c> as "18446744073709552000.0". No .NET SDK emits a
+    ///         number in any affected spelling.
+    ///     </para>
+    ///     <para>
+    ///         So an integer the host *can* hold — anything in [<see cref="long.MinValue" />,
+    ///         <see cref="ulong.MaxValue" />] — matches exactly, including <c>-0</c>, which both it and
+    ///         this method render as "0". Strings, booleans, nulls, and the structure of arrays and
+    ///         objects all match exactly too.
+    ///     </para>
+    /// </remarks>
+    /// <exception cref="ArgumentException">
+    ///     The value is <see cref="JsonValueKind.Undefined" /> (a <c>default(JsonElement)</c> that never came
+    ///     from parsing any JSON), or it contains a number this cannot render faithfully, or it is nested
+    ///     more deeply than the JSON reader's own default limit.
+    /// </exception>
+    public static string ToHostString(JsonElement value)
+    {
+        switch (value.ValueKind)
+        {
+            case JsonValueKind.Undefined:
+                throw new ArgumentException(
+                    "Cannot render an undefined JsonElement as a config property value; this is a default(JsonElement) rather than a parsed one.",
+                    nameof(value));
+            case JsonValueKind.String:
+                // GetString is only null for JsonValueKind.Null, which this arm has excluded.
+                return TruncateAtNul(value.GetString()!);
+            default:
+                var builder = new StringBuilder();
+                WriteValue(value, builder, 0);
+                // No truncation needed here: a NUL inside a nested string is escaped to the six
+                // characters backslash-u-0000 by WriteString, so a rendered composite never contains one.
+                return builder.ToString();
+        }
+    }
+
+    /// <summary>
+    ///     Cut <paramref name="value" /> at its first NUL, if it has one.
+    /// </summary>
+    /// <remarks>
+    ///     The host hands the runtime its property bag as null-terminated strings, so a name or value
+    ///     carrying an embedded NUL reaches managed code as only the part before it. Measured: a config
+    ///     property whose value is <c>"a[NUL]b"</c> arrives at <c>AppContext.GetData</c> as "a", and one
+    ///     whose *name* is <c>"K[NUL]suffix"</c> is registered under "K".
+    /// </remarks>
+    private static string TruncateAtNul(string value)
+    {
+        var nul = value.IndexOf('\0');
+        return nul < 0 ? value : value.Substring(0, nul);
+    }
+
+    /// <summary>
+    ///     Render a JSON number's raw token the way the host renders it, or refuse.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         The host's parser holds an integer token as a 64-bit integer when it fits, and prints that
+    ///         integer back. Round-tripping through <see cref="long" />/<see cref="ulong" /> reproduces
+    ///         this. JSON forbids a leading <c>+</c> and leading zeros, so the only in-range token whose
+    ///         spelling this actually changes is <c>-0</c>, which the host prints as "0" — measured, at
+    ///         top level and at every nesting depth.
+    ///     </para>
+    ///     <para>
+    ///         Every other number — fractional, exponent-bearing, or an integer outside
+    ///         [<see cref="long.MinValue" />, <see cref="ulong.MaxValue" />] — the host puts through a
+    ///         double and prints with rapidjson's dtoa, which this does not model, so this throws rather
+    ///         than return a value it cannot vouch for. Some of those tokens would in fact survive being
+    ///         echoed back — the host renders <c>1.5</c> as "1.5" — but neighbouring ones would not: it
+    ///         renders <c>1.50</c> as "1.5", <c>0.10</c> as "0.1" and <c>1e3</c> as "1000.0". Telling the
+    ///         two groups apart is exactly the modelling being declined, so the whole class is refused.
+    ///     </para>
+    ///     <para>
+    ///         The integer boundaries were measured exactly: -9223372036854775808 and 18446744073709551615
+    ///         keep their spelling, while one step beyond either becomes "-9223372036854776000.0" and
+    ///         "18446744073709552000.0" respectively.
+    ///     </para>
+    /// </remarks>
+    private static string NumberToHostString(string rawText)
+    {
+        if (long.TryParse(rawText, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture,
+                out var signed))
+            return signed.ToString(CultureInfo.InvariantCulture);
+
+        if (ulong.TryParse(rawText, NumberStyles.None, CultureInfo.InvariantCulture, out var unsigned))
+            return unsigned.ToString(CultureInfo.InvariantCulture);
+
+        throw new ArgumentException(
+            $"Cannot render the config property number {rawText} as the host would: it is not an integer in [{long.MinValue}, {ulong.MaxValue}], so the host puts it through a double and prints it with rapidjson's dtoa, which this library does not model. Rather than return a value which may silently differ from what AppContext will report, this refuses. Spell the value as an in-range integer, or as a string if the consumer parses it itself.",
+            nameof(rawText));
+    }
+
+    /// <summary>
+    ///     The deepest value this will render, matching <see cref="JsonReaderOptions.MaxDepth" />'s default
+    ///     of 64: an element parsed with default options cannot exceed it, so this bound only rejects an
+    ///     element built by hand or parsed with a raised limit. It exists because the alternative to
+    ///     rejecting such an element is a <see cref="StackOverflowException" />, which cannot be caught and
+    ///     takes the process out with no diagnostic.
+    /// </summary>
+    private const int MaxDepth = 64;
+
+    /// <summary>
+    ///     Append <paramref name="value" /> to <paramref name="builder" /> as the host would write it.
+    /// </summary>
+    /// <remarks>
+    ///     This does not use <see cref="Utf8JsonWriter" />, because that writer escapes through a
+    ///     <see cref="System.Text.Encodings.Web.JavaScriptEncoder" /> and no available encoder has the
+    ///     host's escaping policy. The default one escapes every non-ASCII and HTML-sensitive character,
+    ///     and <c>UnsafeRelaxedJsonEscaping</c> still escapes U+2028, U+2029 and everything outside the
+    ///     BMP; the host escapes none of those. See <see cref="WriteString" /> for the policy, which was
+    ///     measured rather than inferred.
+    /// </remarks>
+    private static void WriteValue(JsonElement value, StringBuilder builder, int depth)
+    {
+        if (depth > MaxDepth)
+            throw new ArgumentException(
+                $"Cannot render a config property value nested more than {MaxDepth} deep; this is deeper than the JSON reader's own default limit, so it cannot have come from parsing a runtimeconfig.json with default options.",
+                nameof(value));
+
+        switch (value.ValueKind)
+        {
+            case JsonValueKind.Object:
+                builder.Append('{');
+                var firstMember = true;
+                foreach (var member in value.EnumerateObject())
+                {
+                    if (!firstMember) builder.Append(',');
+                    firstMember = false;
+                    WriteString(member.Name, builder);
+                    builder.Append(':');
+                    WriteValue(member.Value, builder, depth + 1);
+                }
+
+                builder.Append('}');
+                return;
+            case JsonValueKind.Array:
+                builder.Append('[');
+                var firstElement = true;
+                foreach (var element in value.EnumerateArray())
+                {
+                    if (!firstElement) builder.Append(',');
+                    firstElement = false;
+                    WriteValue(element, builder, depth + 1);
+                }
+
+                builder.Append(']');
+                return;
+            case JsonValueKind.String:
+                // GetString is only null for JsonValueKind.Null, which this arm has excluded.
+                WriteString(value.GetString()!, builder);
+                return;
+            case JsonValueKind.Number:
+                builder.Append(NumberToHostString(value.GetRawText()));
+                return;
+            case JsonValueKind.True:
+                builder.Append("true");
+                return;
+            case JsonValueKind.False:
+                builder.Append("false");
+                return;
+            case JsonValueKind.Null:
+                builder.Append("null");
+                return;
+            default:
+                throw new ArgumentException(
+                    $"Cannot render a config property value of kind {value.ValueKind} nested inside an array or object.",
+                    nameof(value));
+        }
+    }
+
+    /// <summary>
+    ///     Append <paramref name="value" /> to <paramref name="builder" /> as a quoted JSON string, using
+    ///     the host's escaping policy.
+    /// </summary>
+    /// <remarks>
+    ///     The host escapes exactly the two characters JSON requires (<c>"</c> and <c>\</c>) plus the C0
+    ///     control range, preferring the short forms where they exist and otherwise <c>\u00XX</c> with
+    ///     uppercase hex digits; everything else it emits as raw UTF-8. This was measured by giving a real
+    ///     process a runtimeconfig.json holding each of 291 sampled code points and recording what
+    ///     <c>AppContext.GetData</c> returned, so DEL, Latin-1, U+2028, U+2029 and astral-plane characters
+    ///     are all known to survive unescaped. <c>Test/host-escape-sweep.json</c> holds those observations
+    ///     and the test suite replays every one of them against this method.
+    /// </remarks>
+    private static void WriteString(string value, StringBuilder builder)
+    {
+        builder.Append('"');
+
+        // Iterating chars rather than runes is deliberate: a surrogate pair is copied through as its two
+        // halves, which reassemble into the same pair in the result, and no escaping decision depends on
+        // the astral code point they denote.
+        foreach (var c in value)
+            switch (c)
+            {
+                case '"':
+                    builder.Append("\\\"");
+                    break;
+                case '\\':
+                    builder.Append("\\\\");
+                    break;
+                case '\b':
+                    builder.Append("\\b");
+                    break;
+                case '\f':
+                    builder.Append("\\f");
+                    break;
+                case '\n':
+                    builder.Append("\\n");
+                    break;
+                case '\r':
+                    builder.Append("\\r");
+                    break;
+                case '\t':
+                    builder.Append("\\t");
+                    break;
+                default:
+                    // Note JSON has no short form for U+000B; the host duly writes it as backslash-u-000B.
+                    if (c < ' ')
+                        builder.Append("\\u").Append(((int) c).ToString("X4", CultureInfo.InvariantCulture));
+                    else
+                        builder.Append(c);
+
+                    break;
+            }
+
+        builder.Append('"');
+    }
+
+    /// <summary>
+    ///     Render an entire "configProperties" object the way the .NET host renders it before handing it to
+    ///     the runtime: the resulting keys and values are exactly what managed code will observe through
+    ///     <c>AppContext.GetData</c>.
+    /// </summary>
+    /// <param name="properties">
+    ///     The parsed "configProperties" object, e.g. <see cref="RuntimeOptions.ConfigProperties" />. A
+    ///     null value (the file had no "configProperties" section at all) renders as an empty dictionary,
+    ///     because a file which sets no properties and a file with an empty "configProperties" object are
+    ///     indistinguishable to the runtime.
+    /// </param>
+    /// <returns>An ordinal-keyed dictionary of the host's property bag entries.</returns>
+    /// <remarks>
+    ///     A name containing an embedded NUL is registered under only the part before it, for the reason
+    ///     given on <see cref="TruncateAtNul" />. Two names which become equal once truncated therefore
+    ///     collide, and the later one in the file wins — measured, in both declaration orders. Iterating
+    ///     the parsed object preserves document order, so assigning in that order reproduces it.
+    /// </remarks>
+    public static IReadOnlyDictionary<string, string> ToHostStrings(
+        IReadOnlyDictionary<string, JsonElement>? properties)
+    {
+        // Ordinal, because that is how the runtime compares them: AppContext.Setup builds its store as a
+        // plain Dictionary<string, object?>, whose default comparer for string keys is ordinal.
+        var result = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        if (properties == null) return result;
+
+        foreach (var property in properties)
+            result[TruncateAtNul(property.Key)] = ToHostString(property.Value);
+
+        return result;
+    }
+}
+
+/// <summary>
 ///     The contents of the "runtimeOptions" key in a runtimeconfig.json file.
 /// </summary>
 public record RuntimeOptions
@@ -97,12 +401,38 @@ public record RuntimeOptions
     /// </summary>
     [JsonPropertyName("rollForward")]
     public RollForward? RollForward { get; init; }
+
+    /// <summary>
+    ///     Runtime knobs this application wants set, such as
+    ///     "System.Runtime.Serialization.EnableUnsafeBinaryFormatterSerialization". The .NET host merges these
+    ///     into the property bag it hands the runtime at startup, where managed code reads them back through
+    ///     <c>System.AppContext</c>; null means the file had no "configProperties" section.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         Values are exposed as raw <see cref="JsonElement" />s, i.e. as what the file actually says,
+    ///         because the host's own rendering is a lossy projection of them: it stringifies every value,
+    ///         so a consumer who only ever sees the projection cannot tell the string "42" from the number
+    ///         42. Use <see cref="ConfigProperties.ToHostStrings" /> to obtain that projection when you want
+    ///         what the runtime will actually observe.
+    ///     </para>
+    ///     <para>
+    ///         Note that this record's compiler-generated equality compares this property by reference, as it
+    ///         already does for <see cref="Frameworks" /> and <see cref="IncludedFrameworks" />. Two
+    ///         separately-parsed <see cref="RuntimeConfig" />s with identical "configProperties" therefore
+    ///         compare unequal. Compare <see cref="ConfigProperties.ToHostStrings" /> of each instead;
+    ///         <see cref="JsonElement" /> has no value equality of its own, so there is no comparer which
+    ///         would make the record's own equality do the right thing here.
+    ///     </para>
+    /// </remarks>
+    [JsonPropertyName("configProperties")]
+    public IReadOnlyDictionary<string, JsonElement>? ConfigProperties { get; init; }
 }
 
 /// <summary>
 ///     The contents of a runtimeconfig.json file.
-///     Note that this record doesn't capture everything: for example, "configProperties" might be present in the file,
-///     but is not represented in this type.
+///     Note that this record doesn't capture everything: for example, "additionalProbingPaths" might be present in the
+///     file, but is not represented in this type.
 /// </summary>
 public record RuntimeConfig
 {

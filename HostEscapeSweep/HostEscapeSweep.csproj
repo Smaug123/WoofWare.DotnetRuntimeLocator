@@ -1,0 +1,20 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <!-- net8.0 to match Example: the Windows CI job pins the 8.0.x SDK, so a later target would
+         fail to build there. RollForward is Major because this tool is *meant* to be pointed at
+         whichever runtime you want to measure, which is usually not the one it was compiled
+         against; it records what it actually ran on in the fixture it writes. -->
+    <TargetFramework>net8.0</TargetFramework>
+    <RollForward>Major</RollForward>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="README.md"/>
+  </ItemGroup>
+
+</Project>
