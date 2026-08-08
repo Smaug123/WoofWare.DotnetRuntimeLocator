@@ -124,8 +124,8 @@ module TestRuntimeConfigParse =
     /// top-level one. Every expectation here was measured against the real host on
     /// Microsoft.NETCore.App 10.0.7: it escapes only `"`, `\` and the C0 controls, so HTML-sensitive
     /// characters, DEL, Latin-1, U+2028, U+2029 and astral-plane characters all survive as
-    /// themselves. This is precisely what the first version of this code got wrong by rendering
-    /// through `Utf8JsonWriter`, whose default encoder escapes most of them.
+    /// themselves. Note that `Utf8JsonWriter`'s default encoder escapes most of them, so it cannot be
+    /// used to render these.
     [<Test>]
     let ``Nested strings are escaped exactly as the host escapes them`` () =
         let content =
@@ -329,9 +329,8 @@ module TestRuntimeConfigParse =
     // ------------------------------------------------------------------
 
     /// C#'s `required` checks that the JSON *member is present*, not that its value is non-null, so
-    /// before this was fixed each of these deserialized happily and handed the caller a null in a slot
-    /// the type says can never be null. The first one a consumer touched then threw
-    /// `NullReferenceException` from somewhere unrelated to the file which caused it.
+    /// without an explicit check each of these deserializes happily and hands the caller a null in a
+    /// slot the type says can never be null.
     [<TestCase("""{"runtimeOptions":null}""", "runtimeOptions")>]
     [<TestCase("""{"runtimeOptions":{"tfm":null}}""", "tfm")>]
     [<TestCase("""{"runtimeOptions":{"tfm":"net8.0","framework":{"name":null,"version":"8.0.0"}}}""", "name")>]
@@ -353,9 +352,8 @@ module TestRuntimeConfigParse =
         exn.Message |> shouldContainText jsonMember
 
     /// The types are public and carry their own `JsonPropertyName`s, so a consumer may reasonably
-    /// deserialize them without going through `DeserializeRuntimeConfig` — the first test in this
-    /// fixture does exactly that. The invariant has to hold on that path too, which rules out
-    /// validating in `DeserializeRuntimeConfig` itself.
+    /// deserialize them without going through `DeserializeRuntimeConfig`. The invariant has to hold on
+    /// that path too, which rules out validating in `DeserializeRuntimeConfig` itself.
     [<Test>]
     let ``The rejection does not depend on going through DeserializeRuntimeConfig`` () =
         let exn =
@@ -368,8 +366,8 @@ module TestRuntimeConfigParse =
 
     /// Constructing one directly is checked too: the invariant belongs to the type, not to the
     /// deserializer, and a `RuntimeConfig` built in code is just as likely to be handed to a consumer.
-    /// It is a `JsonException` even here, because `JsonSerializer` was measured to propagate whatever an
-    /// `init` accessor throws unwrapped, so an accessor which threw anything else would leak a second
+    /// It is a `JsonException` even here, because `JsonSerializer` propagates whatever an `init`
+    /// accessor throws unwrapped, so an accessor which threw anything else would leak a second
     /// exception type out of a parse call — which is the more common path by far.
     [<Test>]
     let ``Constructing with a null is rejected as well`` () =
@@ -379,9 +377,9 @@ module TestRuntimeConfigParse =
         exn.Message |> shouldContainText "runtimeOptions"
 
     /// The counterpart control: the members which really are optional must keep deserializing from an
-    /// explicit null, rather than being swept up by the rejection above. Measured against the real
-    /// host on Microsoft.NETCore.App 9.0.0: a runtimeconfig.json with `"configProperties": null` runs
-    /// the app to completion, so refusing this file would be inventing a rule the format does not have.
+    /// explicit null, rather than being swept up by the rejection above. On the real host
+    /// (Microsoft.NETCore.App 9.0.0), a runtimeconfig.json with `"configProperties": null` runs the app
+    /// to completion, so refusing this file would be inventing a rule the format does not have.
     [<Test>]
     let ``A null in a genuinely optional member still parses`` () =
         let content =
@@ -415,8 +413,8 @@ module TestRuntimeConfigParse =
         options.Frameworks.[0]
         |> shouldEqual (RuntimeConfigFramework (Name = "Microsoft.NETCore.App", Version = "8.0.0"))
 
-    /// ... and the same for the other direction: what we hand out cannot be downcast to something
-    /// mutable, which `List<_>` — what the deserializer builds — otherwise can be.
+    /// The other direction: what we hand out cannot be downcast to something mutable, which `List<_>` —
+    /// what the deserializer builds — otherwise can be.
     [<Test>]
     let ``The exposed list cannot be mutated through a downcast`` () =
         let content =
@@ -447,10 +445,10 @@ module TestRuntimeConfigParse =
     /// form, DEL, Latin-1, the HTML-sensitive characters a JavaScript encoder would escape but the host
     /// does not, the JavaScript line terminators, and an astral-plane character.
     ///
-    /// An earlier version of this generator was restricted to `[A-Za-z0-9 ._-]`, on the reasoning that
-    /// the oracle should not have to reimplement an escaping policy to agree with it. That did not
-    /// decouple the test from the policy; it deleted the only inputs which could detect getting the
-    /// policy wrong, and it duly hid a real bug. Fragments are whole strings rather than chars so that
+    /// Restricting this generator to something like `[A-Za-z0-9 ._-]`, on the reasoning that the oracle
+    /// should not have to reimplement an escaping policy to agree with it, does not decouple the test
+    /// from the policy: it deletes the only inputs which could detect getting the policy wrong.
+    /// Fragments are whole strings rather than chars so that
     /// the astral one contributes a complete surrogate pair: a lone surrogate cannot appear in JSON,
     /// and the serialiser would substitute U+FFFD for it.
     let private genSafeString : Gen<string> =

@@ -20,10 +20,10 @@ namespace WoofWare.DotnetRuntimeLocator;
 ///         it. Checking on the way in instead makes the type's non-nullability a fact rather than a wish.
 ///     </para>
 ///     <para>
-///         Refusing is also what the format itself does for three of the four members. Measured against
-///         the real host on Microsoft.NETCore.App 9.0.0: a null "tfm", "name" or "version" makes it exit
-///         with 0x8000808b (ResolverInitFailure) and print nothing whatsoever, so nulling one of those
-///         does not produce a runnable app under any reading. The fourth, "runtimeOptions", is the one
+///         Refusing is also what the format itself does for three of the four members: on the real host
+///         (Microsoft.NETCore.App 9.0.0), a null "tfm", "name" or "version" makes it exit with
+///         0x8000808b (ResolverInitFailure) and print nothing whatsoever, so nulling one of those does
+///         not produce a runnable app under any reading. The fourth, "runtimeOptions", is the one
 ///         divergence, and is discussed on <see cref="RuntimeConfig.RuntimeOptions" />.
 ///     </para>
 ///     <para>
@@ -38,9 +38,9 @@ namespace WoofWare.DotnetRuntimeLocator;
 ///         these records get built, and because it is what the same file already gets for its other
 ///         defects: <c>System.Text.Json</c> raises <see cref="JsonException" /> both for malformed JSON
 ///         and for an absent <c>required</c> member, so a caller who is parsing a file it does not
-///         control still needs exactly one catch. It was measured that
-///         <see cref="JsonSerializer" /> propagates whatever an <c>init</c> accessor throws, unwrapped,
-///         so choosing anything else here would leak a second exception type out of a parse call.
+///         control still needs exactly one catch. <see cref="JsonSerializer" /> propagates whatever an
+///         <c>init</c> accessor throws, unwrapped, so choosing anything else here would leak a second
+///         exception type out of a parse call.
 ///     </para>
 /// </remarks>
 internal static class NonNullableMember
@@ -83,10 +83,9 @@ internal static class NonNullableMember
     ///         cast away from being writable again.
     ///     </para>
     ///     <para>
-    ///         One consequence worth knowing: two records built from the same source list now hold
-    ///         different list instances, and this record's compiler-generated equality compares lists by
-    ///         reference, so they compare unequal. That was already true of two separately-parsed
-    ///         configs; it is now also true of two built in code from one list.
+    ///         One consequence worth knowing: two records built from the same source list hold different
+    ///         list instances, and this record's compiler-generated equality compares lists by reference,
+    ///         so they compare unequal. The same goes for two separately-parsed configs.
     ///     </para>
     /// </remarks>
     /// <exception cref="JsonException">Some element of <paramref name="value" /> is null.</exception>
@@ -580,10 +579,10 @@ public record RuntimeConfig
     /// </summary>
     /// <remarks>
     ///     This is the one place where refusing a null is a policy of ours rather than the format's. The
-    ///     real host was measured on Microsoft.NETCore.App 9.0.0: it rejects a file with no
-    ///     "runtimeOptions" member ("Invalid runtimeconfig.json"), but treats <c>"runtimeOptions":null</c>
-    ///     as an empty options object, which is fatal for a framework-dependent app ("did not specify a
-    ///     framework") and harmless for a self-contained one. Since an empty options object is not
+    ///     real host (Microsoft.NETCore.App 9.0.0) rejects a file with no "runtimeOptions" member
+    ///     ("Invalid runtimeconfig.json"), but treats <c>"runtimeOptions":null</c> as an empty options
+    ///     object, which is fatal for a framework-dependent app ("did not specify a framework") and
+    ///     harmless for a self-contained one. Since an empty options object is not
     ///     representable here either — <see cref="RuntimeOptions.Tfm" /> is itself non-nullable — the two
     ///     spellings of "this file says nothing" are treated alike rather than one of them being handed
     ///     back as a null.
