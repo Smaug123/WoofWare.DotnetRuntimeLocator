@@ -271,6 +271,28 @@ public static class DotnetRuntime
     }
 
     /// <summary>
+    ///     Given a .NET executable DLL, compute the path at which its runtimeconfig.json sits: the file is named
+    ///     after the DLL and lives beside it. The file is not required to exist, and this method does not check.
+    /// </summary>
+    /// <param name="dllPath">Path to an OutputType=Exe .dll file.</param>
+    /// <returns>The absolute path at which the runtimeconfig.json for <paramref name="dllPath" /> would sit.</returns>
+    /// <exception cref="ArgumentException">
+    ///     <paramref name="dllPath" /> does not end in ".dll", or names no parent directory.
+    /// </exception>
+    public static string RuntimeConfigPathForDll(string dllPath)
+    {
+        if (!dllPath.EndsWith(".dll", StringComparison.Ordinal))
+            throw new ArgumentException(
+                $"RuntimeConfigPathForDll requires the input DLL to have the extension '.dll'; provided: {dllPath}");
+
+        var dll = new FileInfo(dllPath);
+        var dllParentDir = dll.Directory ?? throw new ArgumentException($"dll path {dllPath} had no parent");
+        var name = dll.Name.Substring(0, dll.Name.Length - ".dll".Length);
+
+        return Path.Combine(dllParentDir.FullName, $"{name}.runtimeconfig.json");
+    }
+
+    /// <summary>
     ///     Given a .NET executable DLL, identify the most appropriate .NET runtime to run it.
     ///     This is pretty half-baked at the moment; test this yourself to make sure it does what you want it to!
     /// </summary>
@@ -292,9 +314,8 @@ public static class DotnetRuntime
 
         var dll = new FileInfo(dllPath);
         var dllParentDir = dll.Directory ?? throw new ArgumentException($"dll path {dllPath} had no parent");
-        var name = dll.Name.Substring(0, dll.Name.Length - ".dll".Length);
 
-        var configFilePath = Path.Combine(dllParentDir.FullName, $"{name}.runtimeconfig.json");
+        var configFilePath = RuntimeConfigPathForDll(dllPath);
 
         // It appears to be undocumented why this returns a nullable, and the Rider decompiler doesn't suggest there are
         // any code paths where it can return null?

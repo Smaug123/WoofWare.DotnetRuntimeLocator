@@ -14,10 +14,13 @@
     <Compile Include="TestSurface.fs"/>
     <Compile Include="TestDotnetEnvironmentInfo.fs"/>
     <EmbeddedResource Include="runtimeconfig1.json" />
+    <EmbeddedResource Include="runtimeconfig2.json" />
+    <EmbeddedResource Include="host-escape-sweep.json" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="ApiSurface" Version="5.0.1"/>
+    <PackageReference Include="FsCheck" Version="3.3.2"/>
     <PackageReference Include="FsUnit" Version="7.1.1"/>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1"/>
     <PackageReference Include="NUnit" Version="4.4.0"/>

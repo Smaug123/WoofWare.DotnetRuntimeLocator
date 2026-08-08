@@ -10,6 +10,11 @@
     "hash": "sha256-dNbs5+gzjjMw2fl0ZRB9qzj9d+rz1o3Wi/qUvBDoz2E="
   },
   {
+    "pname": "FsCheck",
+    "version": "3.3.2",
+    "hash": "sha256-3ydyTGpqySynjbcWbmFVeCBnT3KDH3miPSJYJlyxrGs="
+  },
+  {
     "pname": "FSharp.Core",
     "version": "9.0.303",
     "hash": "sha256-AxR6wqodeU23KOTgkUfIgbavgbcSuzD4UBP+tiFydgA="

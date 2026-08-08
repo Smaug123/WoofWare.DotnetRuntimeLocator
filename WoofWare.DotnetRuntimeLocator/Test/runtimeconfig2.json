@@ -1,0 +1,20 @@
+{
+  "runtimeOptions": {
+    "tfm": "net10.0",
+    "framework": {
+      "name": "Microsoft.NETCore.App",
+      "version": "10.0.0"
+    },
+    "configProperties": {
+      "Probe.StringVal": "hello world",
+      "Probe.BoolTrue": true,
+      "Probe.BoolFalse": false,
+      "Probe.IntVal": 42,
+      "Probe.NegativeIntVal": -7,
+      "Probe.NullVal": null,
+      "Probe.ArrayVal": [1, "two", true],
+      "Probe.ObjVal": { "a": 1, "b": "c" },
+      "Probe.EmptyString": ""
+    }
+  }
+}
