@@ -264,7 +264,14 @@ public static class DotnetRuntime
     /// Parse a runtimeconfig.json file.
     /// </summary>
     /// <param name="contents">Contents of the runtimeconfig.json file to parse.</param>
-    /// <exception cref="NullReferenceException">I think this can't happen, but the docs suggest that deserialization might return null.</exception>
+    /// <returns>
+    /// The parsed file, or null if <paramref name="contents"/> was the JSON document "null".
+    /// </returns>
+    /// <exception cref="JsonException">
+    /// <paramref name="contents"/> is not JSON, or is missing a member the format requires, or spells such a
+    /// member as null. The message names the offending member in the last case; see
+    /// <see cref="RuntimeConfig.RuntimeOptions"/> for why a null there is refused rather than represented.
+    /// </exception>
     public static RuntimeConfig? DeserializeRuntimeConfig(string contents)
     {
         return JsonSerializer.Deserialize<RuntimeConfig>(contents, _options);

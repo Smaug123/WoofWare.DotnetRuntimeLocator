@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
@@ -8,21 +9,128 @@ using System.Text.Json.Serialization;
 namespace WoofWare.DotnetRuntimeLocator;
 
 /// <summary>
+///     Enforcement for the members of this file's types whose slots are non-nullable.
+/// </summary>
+/// <remarks>
+///     <para>
+///         C#'s <c>required</c> constrains the JSON member to be <em>present</em>; it says nothing about
+///         its value. So <c>{"runtimeOptions":null}</c> satisfies <c>required</c> and lands a null in a
+///         slot the type declares can never hold one, and the first consumer to dereference it gets a
+///         <see cref="NullReferenceException" /> naming their own code rather than the file which caused
+///         it. Checking on the way in instead makes the type's non-nullability a fact rather than a wish.
+///     </para>
+///     <para>
+///         Refusing is also what the format itself does for three of the four members: on the real host
+///         (Microsoft.NETCore.App 9.0.0), a null "tfm", "name" or "version" makes it exit with
+///         0x8000808b (ResolverInitFailure) and print nothing whatsoever, so nulling one of those does
+///         not produce a runnable app under any reading. The fourth, "runtimeOptions", is the one
+///         divergence, and is discussed on <see cref="RuntimeConfig.RuntimeOptions" />.
+///     </para>
+///     <para>
+///         This lives in the <c>init</c> accessors rather than in a converter or in
+///         <see cref="DotnetRuntime.DeserializeRuntimeConfig" />, because the invariant belongs to the
+///         type: these records are public, so a consumer can deserialize them itself — the test suite
+///         does — or build one in code, and both paths must uphold it. An accessor also covers an
+///         element nested in "frameworks" or "includedFrameworks" without any extra machinery.
+///     </para>
+///     <para>
+///         The exception is a <see cref="JsonException" /> because deserializing is overwhelmingly how
+///         these records get built, and because it is what the same file already gets for its other
+///         defects: <c>System.Text.Json</c> raises <see cref="JsonException" /> both for malformed JSON
+///         and for an absent <c>required</c> member, so a caller who is parsing a file it does not
+///         control still needs exactly one catch. <see cref="JsonSerializer" /> propagates whatever an
+///         <c>init</c> accessor throws, unwrapped, so choosing anything else here would leak a second
+///         exception type out of a parse call.
+///     </para>
+/// </remarks>
+internal static class NonNullableMember
+{
+    /// <summary>
+    ///     Return <paramref name="value" />, or refuse it if it is null.
+    /// </summary>
+    /// <param name="value">The value the member is being set to.</param>
+    /// <param name="jsonName">The member's name as it is spelled in the file, for the error message.</param>
+    /// <exception cref="JsonException"><paramref name="value" /> is null.</exception>
+    internal static T OrThrow<T>(T? value, string jsonName) where T : class
+    {
+        return value ?? throw new JsonException(
+            $"The runtimeconfig.json member \"{jsonName}\" was present but null. This library declares that member non-nullable, so it refuses the file rather than hand you a null in a slot which cannot hold one. Give the member a value, or omit it if it is one of the optional ones.");
+    }
+
+    /// <summary>
+    ///     Return an unaliased, unmodifiable copy of <paramref name="value" />, or refuse it if any
+    ///     element is null.
+    /// </summary>
+    /// <param name="value">
+    ///     The list the member is being set to. A null list is fine and passes straight through: the
+    ///     members holding lists are themselves optional, and it is only their <em>elements</em> which
+    ///     are declared non-nullable.
+    /// </param>
+    /// <param name="jsonName">The member's name as it is spelled in the file, for the error message.</param>
+    /// <remarks>
+    ///     <para>
+    ///         This case needs checking on the list rather than in an accessor of the element type,
+    ///         because an element spelled <c>null</c> constructs no element at all — there is nothing
+    ///         whose accessor could run.
+    ///     </para>
+    ///     <para>
+    ///         It copies rather than validating in place, because a check on a list someone else holds
+    ///         only establishes the invariant for an instant: the caller could null an entry afterwards,
+    ///         and what the deserializer builds is a <see cref="List{T}" />, which anyone holding the
+    ///         <see cref="IReadOnlyList{T}" /> can downcast and write to. Both would falsify a claim
+    ///         these records make about themselves. The copy is wrapped rather than handed back as an
+    ///         array for the same reason: an array exposed as <see cref="IReadOnlyList{T}" /> is one
+    ///         cast away from being writable again.
+    ///     </para>
+    ///     <para>
+    ///         One consequence worth knowing: two records built from the same source list hold different
+    ///         list instances, and this record's compiler-generated equality compares lists by reference,
+    ///         so they compare unequal. The same goes for two separately-parsed configs.
+    ///     </para>
+    /// </remarks>
+    /// <exception cref="JsonException">Some element of <paramref name="value" /> is null.</exception>
+    internal static IReadOnlyList<T>? ElementsOrThrow<T>(IReadOnlyList<T?>? value, string jsonName) where T : class
+    {
+        if (value == null) return null;
+
+        var copy = new T[value.Count];
+
+        for (var i = 0; i < value.Count; i++)
+            copy[i] = value[i] ?? throw new JsonException(
+                $"Entry {i} of the runtimeconfig.json member \"{jsonName}\" was null. This library declares the entries of that list non-nullable, so it refuses the file rather than hand you a null in a slot which cannot hold one. Give the entry a value, or remove it.");
+
+        return new ReadOnlyCollection<T>(copy);
+    }
+}
+
+/// <summary>
 ///     The type of a "framework" entry in the "runtimeOptions" setting of a runtimeconfig.json file.
 /// </summary>
 public record RuntimeConfigFramework
 {
-    /// <summary>
-    ///     For example, "Microsoft.NETCore.App".
-    /// </summary>
-    [JsonPropertyName("name")]
-    public required string Name { get; init; }
+    private readonly string _name = null!;
+    private readonly string _version = null!;
 
     /// <summary>
-    ///     For example, "9.0.0".
+    ///     For example, "Microsoft.NETCore.App". Never null: a file spelling it <c>null</c> is rejected
+    ///     when it is parsed.
+    /// </summary>
+    [JsonPropertyName("name")]
+    public required string Name
+    {
+        get => _name;
+        init => _name = NonNullableMember.OrThrow(value, "name");
+    }
+
+    /// <summary>
+    ///     For example, "9.0.0". Never null: a file spelling it <c>null</c> is rejected when it is parsed.
     /// </summary>
     [JsonPropertyName("version")]
-    public required string Version { get; init; }
+    public required string Version
+    {
+        get => _version;
+        init => _version = NonNullableMember.OrThrow(value, "version");
+    }
 }
 
 /// <summary>
@@ -371,9 +479,18 @@ public static class ConfigProperties
 /// </summary>
 public record RuntimeOptions
 {
-    /// Target framework moniker, such as "net9.0".
+    private readonly string _tfm = null!;
+
+    /// <summary>
+    ///     Target framework moniker, such as "net9.0". Never null: a file spelling it <c>null</c> is
+    ///     rejected when it is parsed.
+    /// </summary>
     [JsonPropertyName("tfm")]
-    public required string Tfm { get; init; }
+    public required string Tfm
+    {
+        get => _tfm;
+        init => _tfm = NonNullableMember.OrThrow(value, "tfm");
+    }
 
     /// <summary>
     ///     The .NET runtime which this executable expects.
@@ -383,18 +500,36 @@ public record RuntimeOptions
     [JsonPropertyName("framework")]
     public RuntimeConfigFramework? Framework { get; init; }
 
+    private readonly IReadOnlyList<RuntimeConfigFramework>? _frameworks;
+    private readonly IReadOnlyList<RuntimeConfigFramework>? _includedFrameworks;
+
     /// <summary>
     ///     Any of these runtimes by itself would be enough to run this executable.
     ///     It's much more normal to see a single `framework` instead of this.
+    ///     The list may be absent, but none of its entries is ever null: a file spelling an entry
+    ///     <c>null</c> is rejected when it is parsed, and what is stored is an unmodifiable copy, so
+    ///     nothing can put a null there afterwards either.
     /// </summary>
     [JsonPropertyName("frameworks")]
-    public IReadOnlyList<RuntimeConfigFramework>? Frameworks { get; init; }
+    public IReadOnlyList<RuntimeConfigFramework>? Frameworks
+    {
+        get => _frameworks;
+        init => _frameworks = NonNullableMember.ElementsOrThrow<RuntimeConfigFramework>(value, "frameworks");
+    }
 
     /// <summary>
     ///     This is a self-contained executable which has these framework entirely contained next to it.
+    ///     The list may be absent, but none of its entries is ever null: a file spelling an entry
+    ///     <c>null</c> is rejected when it is parsed, and what is stored is an unmodifiable copy, so
+    ///     nothing can put a null there afterwards either.
     /// </summary>
     [JsonPropertyName("includedFrameworks")]
-    public IReadOnlyList<RuntimeConfigFramework>? IncludedFrameworks { get; init; }
+    public IReadOnlyList<RuntimeConfigFramework>? IncludedFrameworks
+    {
+        get => _includedFrameworks;
+        init => _includedFrameworks =
+            NonNullableMember.ElementsOrThrow<RuntimeConfigFramework>(value, "includedFrameworks");
+    }
 
     /// <summary>
     ///     This application advertises that it's fine with running under this roll-forward.
@@ -436,11 +571,28 @@ public record RuntimeOptions
 /// </summary>
 public record RuntimeConfig
 {
+    private readonly RuntimeOptions _runtimeOptions = null!;
+
     /// <summary>
-    ///     The contents of the file.
+    ///     The contents of the file. Never null: a file spelling it <c>null</c> is rejected when it is
+    ///     parsed, exactly as a file omitting it is.
     /// </summary>
+    /// <remarks>
+    ///     This is the one place where refusing a null is a policy of ours rather than the format's. The
+    ///     real host (Microsoft.NETCore.App 9.0.0) rejects a file with no "runtimeOptions" member
+    ///     ("Invalid runtimeconfig.json"), but treats <c>"runtimeOptions":null</c> as an empty options
+    ///     object, which is fatal for a framework-dependent app ("did not specify a framework") and
+    ///     harmless for a self-contained one. Since an empty options object is not
+    ///     representable here either — <see cref="RuntimeOptions.Tfm" /> is itself non-nullable — the two
+    ///     spellings of "this file says nothing" are treated alike rather than one of them being handed
+    ///     back as a null.
+    /// </remarks>
     [JsonPropertyName("runtimeOptions")]
-    public required RuntimeOptions RuntimeOptions { get; init; }
+    public required RuntimeOptions RuntimeOptions
+    {
+        get => _runtimeOptions;
+        init => _runtimeOptions = NonNullableMember.OrThrow(value, "runtimeOptions");
+    }
 }
 
 [JsonSourceGenerationOptions(WriteIndented = true)]
