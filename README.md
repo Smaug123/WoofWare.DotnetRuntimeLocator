@@ -1,5 +1,11 @@
 # WoofWare.DotnetRuntimeLocator
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="logos/dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="logos/light.svg">
+  <img alt="Project logo: minimalistic face of a cartoon Shiba Inu, drawn in outline, at the centre of a radar scope: concentric rings, crosshairs, and a single blip on the outer ring." src="logos/light.svg" width="300">
+</picture>
+
 Helpers to locate the .NET runtime and SDKs programmatically.
 (If you're parsing `dotnet --list-runtimes`, you're doing it wrong!)
 
