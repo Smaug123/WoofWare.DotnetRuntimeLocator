@@ -10,6 +10,7 @@
   <ItemGroup>
     <Compile Include="Assembly.fs" />
     <Compile Include="TestDotnetRuntime.fs" />
+    <Compile Include="TestSelectRuntime.fs" />
     <Compile Include="TestRuntimeConfigParse.fs"/>
     <Compile Include="TestSurface.fs"/>
     <Compile Include="TestDotnetEnvironmentInfo.fs"/>
