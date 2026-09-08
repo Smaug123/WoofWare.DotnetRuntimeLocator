@@ -2,8 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+
+[assembly: InternalsVisibleTo("Test")]
 
 namespace WoofWare.DotnetRuntimeLocator;
 
@@ -72,21 +75,55 @@ internal class DotnetRuntimeSelection
 /// </summary>
 public static class DotnetRuntime
 {
+    /// <summary>
+    ///     The policy which <paramref name="value" /> names, as hostfxr's roll_forward_option_from_string decides it: a
+    ///     strcasecmp of the whole string against each policy name, so ASCII letters match regardless of case and every
+    ///     other character must match exactly. Nothing is trimmed, and the numeric form of the enum is not a name.
+    /// </summary>
+    /// <returns>The named policy, or null when hostfxr would report the value as invalid.</returns>
+    private static RollForward? ParseRollForwardName(string value)
+    {
+        foreach (var policy in Enum.GetValues<RollForward>())
+        {
+            var name = policy.ToString();
+            if (name.Length != value.Length) continue;
+
+            var matches = true;
+            for (var i = 0; i < name.Length; i++)
+            {
+                // The policy names are ASCII letters, so folding the candidate's ASCII uppercase is the whole of what
+                // strcasecmp does here; a non-ASCII character in the candidate can only ever fail to match.
+                var c = value[i];
+                if (c is >= 'A' and <= 'Z') c = (char) (c + ('a' - 'A'));
+                if (c != char.ToLowerInvariant(name[i]))
+                {
+                    matches = false;
+                    break;
+                }
+            }
+
+            if (matches) return policy;
+        }
+
+        return null;
+    }
+
     /// <returns>For each requested runtime in the RuntimeOptions, the resolved place in which to find that runtime.</returns>
-    private static IReadOnlyDictionary<string, DotnetRuntimeSelection> SelectRuntime(RuntimeOptions options,
+    internal static IReadOnlyDictionary<string, DotnetRuntimeSelection> SelectRuntime(RuntimeOptions options,
         DotnetEnvironmentInfo env)
     {
         var rollForwardEnvVar = Environment.GetEnvironmentVariable("DOTNET_ROLL_FORWARD");
         RollForward rollForward;
-        if (rollForwardEnvVar == null)
+        if (string.IsNullOrEmpty(rollForwardEnvVar))
         {
+            // hostfxr's pal::getenv reports an empty variable as unset.
             rollForward = options.RollForward ?? RollForward.Minor;
         }
         else
         {
-            if (!Enum.TryParse(rollForwardEnvVar, out rollForward))
-                throw new ArgumentException(
-                    $"Unable to parse the value of environment variable DOTNET_ROLL_FORWARD, which was: {rollForwardEnvVar}");
+            rollForward = ParseRollForwardName(rollForwardEnvVar) ??
+                          throw new ArgumentException(
+                              $"Unable to parse the value of environment variable DOTNET_ROLL_FORWARD, which was: '{rollForwardEnvVar}'. hostfxr accepts exactly the six policy names (Disable, LatestPatch, Minor, LatestMinor, Major, LatestMajor), in any casing but with nothing added, and refuses to launch on anything else.");
         }
 
         IReadOnlyDictionary<string, Version> desiredVersions;
@@ -199,7 +236,31 @@ public static class DotnetRuntime
             }
             case RollForward.Major:
             {
-                throw new NotImplementedException();
+                // hostfxr (fx_resolver.cpp) admits every installed version at or above the requested one,
+                // whatever its major, and keeps the lowest of them; it then rolls to the highest patch at that
+                // major.minor. So when the requested major is installed this is exactly Minor, and when it is
+                // absent the answer is the lowest higher major at its lowest installed minor.
+                return desiredVersions.Select(desired =>
+                {
+                    if (!availableRuntimes.TryGetValue(desired.Key, out var available))
+                    {
+                        return (desired.Key, new DotnetRuntimeSelection());
+                    }
+
+                    // availableRuntimes holds only versions at or above the desired one, and only for frameworks
+                    // with at least one such version, so the group is non-empty.
+                    var lowest = available.MinBy(data => data.InstalledVersion) ??
+                                 throw new InvalidOperationException(
+                                     "logic error: every framework in availableRuntimes has at least one version");
+
+                    var latestPatch = available
+                        .Where(data =>
+                            data.InstalledVersion.Major == lowest.InstalledVersion.Major &&
+                            data.InstalledVersion.Minor == lowest.InstalledVersion.Minor)
+                        .MaxBy(data => data.InstalledVersion)!;
+
+                    return (desired.Key, new DotnetRuntimeSelection(latestPatch.Installed));
+                }).ToDictionary();
             }
             case RollForward.LatestPatch:
             {

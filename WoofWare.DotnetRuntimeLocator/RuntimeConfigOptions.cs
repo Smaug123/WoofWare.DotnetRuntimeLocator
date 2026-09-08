@@ -38,9 +38,9 @@ public enum RollForward
     Minor,
 
     /// <summary>
-    ///     If the requested version is missing, roll forward to the lowest available major version higher than requested,
-    ///     at "lowest minor version" (the docs are unclear whether this means "lowest *available*", or "0").
-    ///     If the requested version is available, silently use the Minor policy.
+    ///     If the requested major version is missing, roll forward to the lowest available major version higher than
+    ///     requested, at the lowest minor version available for that major (and the highest patch at that minor).
+    ///     If the requested major version is available, silently use the Minor policy.
     /// </summary>
     Major,
 
