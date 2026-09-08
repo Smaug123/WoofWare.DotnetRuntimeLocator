@@ -2,8 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+
+[assembly: InternalsVisibleTo("Test")]
 
 namespace WoofWare.DotnetRuntimeLocator;
 
@@ -73,7 +76,7 @@ internal class DotnetRuntimeSelection
 public static class DotnetRuntime
 {
     /// <returns>For each requested runtime in the RuntimeOptions, the resolved place in which to find that runtime.</returns>
-    private static IReadOnlyDictionary<string, DotnetRuntimeSelection> SelectRuntime(RuntimeOptions options,
+    internal static IReadOnlyDictionary<string, DotnetRuntimeSelection> SelectRuntime(RuntimeOptions options,
         DotnetEnvironmentInfo env)
     {
         var rollForwardEnvVar = Environment.GetEnvironmentVariable("DOTNET_ROLL_FORWARD");
@@ -84,7 +87,8 @@ public static class DotnetRuntime
         }
         else
         {
-            if (!Enum.TryParse(rollForwardEnvVar, out rollForward))
+            // hostfxr matches the value against the policy names with strcasecmp, so any casing names the policy.
+            if (!Enum.TryParse(rollForwardEnvVar, ignoreCase: true, out rollForward))
                 throw new ArgumentException(
                     $"Unable to parse the value of environment variable DOTNET_ROLL_FORWARD, which was: {rollForwardEnvVar}");
         }
@@ -199,7 +203,31 @@ public static class DotnetRuntime
             }
             case RollForward.Major:
             {
-                throw new NotImplementedException();
+                // hostfxr (fx_resolver.cpp) admits every installed version at or above the requested one,
+                // whatever its major, and keeps the lowest of them; it then rolls to the highest patch at that
+                // major.minor. So when the requested major is installed this is exactly Minor, and when it is
+                // absent the answer is the lowest higher major at its lowest installed minor.
+                return desiredVersions.Select(desired =>
+                {
+                    if (!availableRuntimes.TryGetValue(desired.Key, out var available))
+                    {
+                        return (desired.Key, new DotnetRuntimeSelection());
+                    }
+
+                    // availableRuntimes holds only versions at or above the desired one, and only for frameworks
+                    // with at least one such version, so the group is non-empty.
+                    var lowest = available.MinBy(data => data.InstalledVersion) ??
+                                 throw new InvalidOperationException(
+                                     "logic error: every framework in availableRuntimes has at least one version");
+
+                    var latestPatch = available
+                        .Where(data =>
+                            data.InstalledVersion.Major == lowest.InstalledVersion.Major &&
+                            data.InstalledVersion.Minor == lowest.InstalledVersion.Minor)
+                        .MaxBy(data => data.InstalledVersion)!;
+
+                    return (desired.Key, new DotnetRuntimeSelection(latestPatch.Installed));
+                }).ToDictionary();
             }
             case RollForward.LatestPatch:
             {
