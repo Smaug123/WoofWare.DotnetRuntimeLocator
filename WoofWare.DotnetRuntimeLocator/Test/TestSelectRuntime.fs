@@ -110,21 +110,103 @@ module TestSelectRuntime =
         let arb = Arb.fromGen (Gen.zip genVersion (Gen.listOf genVersion))
         Check.One (Config.QuickThrowOnFailure.WithMaxTest 500, Prop.forAll arb property)
 
+    /// Run `f` with `DOTNET_ROLL_FORWARD` set to `value` (or unset, for `None`), restoring it after.
+    let private withRollForwardEnv (value : string option) (f : unit -> 'a) : 'a =
+        let previous = Environment.GetEnvironmentVariable "DOTNET_ROLL_FORWARD"
+
+        try
+            Environment.SetEnvironmentVariable ("DOTNET_ROLL_FORWARD", Option.toObj value)
+            f ()
+        finally
+            Environment.SetEnvironmentVariable ("DOTNET_ROLL_FORWARD", previous)
+
+    /// An environment and a file setting under which the env var's answer is distinguishable
+    /// from the file's: `Disable` at 8.0.10 picks 8.0.10, while `LatestMajor` picks 10.0.7.
+    let private selectUnderEnv (value : string option) : Version option =
+        withRollForwardEnv
+            value
+            (fun () ->
+                installed [ "10.0.7" ; "9.0.5" ; "8.0.10" ]
+                |> select (requesting RollForward.Disable "8.0.10")
+            )
+
     /// hostfxr reads both the file's `rollForward` and `DOTNET_ROLL_FORWARD` through
     /// `roll_forward_option_from_string`, a `strcasecmp` loop, so any casing names the policy.
     [<Test>]
     [<NonParallelizable>]
     let ``DOTNET_ROLL_FORWARD is read case-insensitively`` () =
-        let previous = Environment.GetEnvironmentVariable "DOTNET_ROLL_FORWARD"
+        selectUnderEnv (Some "latestMAJOR") |> shouldEqual (Some (Version "10.0.7"))
 
-        try
-            Environment.SetEnvironmentVariable ("DOTNET_ROLL_FORWARD", "latestMAJOR")
+    /// `strcasecmp` compares the whole string, so anything but a policy name makes hostfxr
+    /// refuse to launch ("Invalid value for environment variable 'DOTNET_ROLL_FORWARD'"):
+    /// padding is not trimmed, and the numeric form of the enum is not a name.
+    [<TestCase(" latestMAJOR ")>]
+    [<TestCase("LatestMajor\n")>]
+    [<TestCase("\tMajor")>]
+    [<TestCase("3")>]
+    [<TestCase("Major,Minor")>]
+    [<NonParallelizable>]
+    let ``DOTNET_ROLL_FORWARD must be exactly a policy name`` (value : string) =
+        let exn =
+            Assert.Throws<ArgumentException> (fun () -> selectUnderEnv (Some value) |> ignore)
 
-            installed [ "10.0.7" ; "9.0.5" ; "8.0.10" ]
-            |> select (requesting RollForward.Disable "8.0.0")
-            |> shouldEqual (Some (Version "10.0.7"))
-        finally
-            Environment.SetEnvironmentVariable ("DOTNET_ROLL_FORWARD", previous)
+        exn.Message |> shouldContainText "DOTNET_ROLL_FORWARD"
+
+    /// hostfxr's `pal::getenv` reports an empty variable as unset, so the file's setting applies.
+    [<Test>]
+    [<NonParallelizable>]
+    let ``an empty DOTNET_ROLL_FORWARD is unset`` () =
+        selectUnderEnv (Some "") |> shouldEqual (Some (Version "8.0.10"))
+        selectUnderEnv None |> shouldEqual (Some (Version "8.0.10"))
+
+    let private genPolicyName : Gen<RollForward * string> =
+        gen {
+            let! policy = Gen.elements (Enum.GetValues<RollForward> ())
+            let name = string policy
+            let! flips = Gen.listOfLength name.Length (ArbMap.defaults |> ArbMap.generate<bool>)
+
+            let spelling =
+                Seq.zip name flips
+                |> Seq.map (fun (c, flip) ->
+                    if flip then
+                        Char.ToUpperInvariant c
+                    else
+                        Char.ToLowerInvariant c
+                )
+                |> Seq.toArray
+                |> String
+
+            return policy, spelling
+        }
+
+    /// Every casing of a policy name is that policy, and that name with one more character
+    /// anywhere is nothing at all.
+    [<Test>]
+    [<NonParallelizable>]
+    let ``DOTNET_ROLL_FORWARD accepts exactly the casings of the six names`` () =
+        let expected : Map<RollForward, Version option> =
+            Map.ofList
+                [
+                    RollForward.Disable, Some (Version "8.0.10")
+                    RollForward.LatestPatch, Some (Version "8.0.10")
+                    RollForward.Minor, Some (Version "8.0.10")
+                    RollForward.LatestMinor, Some (Version "8.0.10")
+                    RollForward.Major, Some (Version "8.0.10")
+                    RollForward.LatestMajor, Some (Version "10.0.7")
+                ]
+
+        let property ((policy, spelling) : RollForward * string, extra : char, position : int) : unit =
+            selectUnderEnv (Some spelling) |> shouldEqual expected.[policy]
+
+            let padded = spelling.Insert (position % (spelling.Length + 1), string extra)
+
+            Assert.Throws<ArgumentException> (fun () -> selectUnderEnv (Some padded) |> ignore)
+            |> ignore
+
+        let genExtra = Gen.elements [ ' ' ; '\n' ; '\t' ; '\r' ; '0' ; 'x' ; '-' ]
+        let genPosition = Gen.choose (0, 20)
+        let arb = Arb.fromGen (Gen.zip3 genPolicyName genExtra genPosition)
+        Check.One (Config.QuickThrowOnFailure.WithMaxTest 300, Prop.forAll arb property)
 
     /// The `runtimeconfig.json` the SDK ships in a dotnet tool package (this one is Fantomas
     /// 7.0.0's, verbatim), read through the entry point a consumer actually calls. The test host
