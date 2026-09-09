@@ -439,6 +439,35 @@ module TestSelectRuntime =
         for policy, answer in expected do
             env |> selectVersion (requesting policy "8.0.0") |> shouldEqual answer
 
+    /// hostfxr's exact compatibility range never parses or compares versions: `fx_resolver.cpp`
+    /// appends the requested version *string* to the framework directory and takes that directory or
+    /// nothing. So `Disable` is spelled-out string equality, not precedence -- and the two differ
+    /// exactly when build metadata is in play, since build metadata takes no part in precedence.
+    [<Test>]
+    let ``Disable matches the requested version's spelling, not its precedence`` () =
+        // hostfxr would look for a directory named "9.0.5" and not find one.
+        installed [ "9.0.5+custom" ]
+        |> selectVersion (requesting RollForward.Disable "9.0.5")
+        |> shouldEqual None
+
+        // ... and here it finds "9.0.5" itself, not the one which merely ranks the same.
+        installed [ "9.0.5+custom" ; "9.0.5" ]
+        |> selectVersion (requesting RollForward.Disable "9.0.5")
+        |> shouldEqual (Some "9.0.5")
+
+    /// The same distinction when the requested version is itself carrying build metadata: the
+    /// directory hostfxr looks for is the whole string, so an installed version of equal precedence
+    /// listed earlier must not be taken in its place.
+    [<Test>]
+    let ``Disable picks the requested build, not one of equal precedence`` () =
+        installed [ "9.0.5+other" ; "9.0.5+expected" ]
+        |> selectVersion (requesting RollForward.Disable "9.0.5+expected")
+        |> shouldEqual (Some "9.0.5+expected")
+
+        installed [ "9.0.5+other" ]
+        |> selectVersion (requesting RollForward.Disable "9.0.5+expected")
+        |> shouldEqual None
+
     /// Every policy answers "nothing" for a framework with no installed version at all, rather than
     /// throwing on a missing dictionary key.
     [<TestCase(RollForward.Minor)>]
