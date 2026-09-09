@@ -468,6 +468,25 @@ module TestSelectRuntime =
         |> selectVersion (requesting RollForward.Disable "9.0.5+expected")
         |> shouldEqual None
 
+    /// Two installed versions tie only by differing in build metadata. hostfxr's own answer then
+    /// depends on the order `readdir` gave its resolver, and the list we are handed came from a
+    /// different code path which `std::sort`s by precedence -- an unstable sort, so even the order of
+    /// the tied pair we receive is unspecified. So there is no hostfxr answer to match here; what we
+    /// owe the caller is that we pick one of them, and pick the same one every time.
+    [<Test>]
+    let ``a build-metadata tie resolves to one candidate, deterministically`` () =
+        let env = installed [ "9.0.5+a" ; "9.0.5+b" ]
+
+        let answers =
+            List.replicate 5 ()
+            |> List.map (fun () -> env |> selectVersion (requesting RollForward.Minor "9.0.0"))
+
+        answers |> List.distinct |> List.length |> shouldEqual 1
+
+        match List.head answers with
+        | Some picked -> [ "9.0.5+a" ; "9.0.5+b" ] |> List.contains picked |> shouldEqual true
+        | None -> failwith "expected one of the tied candidates to be selected"
+
     /// Every policy answers "nothing" for a framework with no installed version at all, rather than
     /// throwing on a missing dictionary key.
     [<TestCase(RollForward.Minor)>]

@@ -326,8 +326,8 @@ internal sealed class FxVersion : IComparable<FxVersion>, IComparable, IEquatabl
     }
 
     /// <summary>
-    ///     Whether one dot-separated identifier is valid: non-empty, drawn from [0-9A-Za-z-], and — outside
-    ///     build metadata — not a numeric identifier padded with leading zeros.
+    ///     Whether one dot-separated identifier is valid: non-empty, drawn from [0-9A-Za-z-], and -- outside
+    ///     build metadata -- not a numeric identifier padded with leading zeros.
     /// </summary>
     private static bool ValidIdentifier(string s, int start, int length, bool buildMeta)
     {

@@ -230,11 +230,23 @@ public static class DotnetRuntime
     ///     <paramref name="desired" />.
     /// </summary>
     /// <remarks>
-    ///     Two phases. First the policy's compatibility range says which candidates are admissible, and the
-    ///     lowest of them is taken — or the highest, for the policies which set hostfxr's
-    ///     <c>roll_to_highest_version</c>. Then <c>automatic_roll_to_latest_patch</c> moves to the highest
-    ///     patch at that major.minor, except from a prerelease, where hostfxr keeps the closest match rather
-    ///     than rolling.
+    ///     <para>
+    ///         Two phases. First the policy's compatibility range says which candidates are admissible,
+    ///         and the lowest of them is taken -- or the highest, for the policies which set hostfxr's
+    ///         <c>roll_to_highest_version</c>. Then <c>automatic_roll_to_latest_patch</c> moves to the
+    ///         highest patch at that major.minor, except from a prerelease, where hostfxr keeps the
+    ///         closest match rather than rolling.
+    ///     </para>
+    ///     <para>
+    ///         Two candidates tie only by differing in build metadata, which takes no part in precedence.
+    ///         Which one hostfxr returns then is not something this library can predict. Its resolver
+    ///         walks a list built by <c>readdir</c>, and its second phase replaces the incumbent on a tie,
+    ///         since <c>std::max(ver, best_match_version)</c> yields <c>ver</c> when neither is smaller.
+    ///         The list we are handed instead came from <c>hostfxr_get_dotnet_environment_info</c>, which
+    ///         <c>std::sort</c>s by precedence, and that sort is not stable, so even the order of the tied
+    ///         pair we receive is unspecified. There is no order here to agree with. We keep the first, so
+    ///         that our answer is at least a function of our input.
+    ///     </para>
     /// </remarks>
     /// <returns>The chosen runtime, or null when the policy admits none of the candidates.</returns>
     private static RuntimeOnDisk? SearchForBestFrameworkMatch(RollForward rollForward,
