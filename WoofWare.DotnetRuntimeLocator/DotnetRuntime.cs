@@ -126,7 +126,7 @@ public static class DotnetRuntime
                               $"Unable to parse the value of environment variable DOTNET_ROLL_FORWARD, which was: '{rollForwardEnvVar}'. hostfxr accepts exactly the six policy names (Disable, LatestPatch, Minor, LatestMinor, Major, LatestMajor), in any casing but with nothing added, and refuses to launch on anything else.");
         }
 
-        IReadOnlyDictionary<string, Version> desiredVersions;
+        IReadOnlyDictionary<string, RequestedFramework> desiredVersions;
         if (options.IncludedFrameworks == null)
         {
             if (options.Framework == null)
@@ -135,188 +135,252 @@ public static class DotnetRuntime
                     throw new InvalidDataException(
                         "Expected runtimeconfig.json file to have either a framework or frameworks entry, but it had neither");
 
-                desiredVersions = options.Frameworks.Select(x => (x.Name, new Version(x.Version))).GroupBy(x => x.Name)
-                    .Select(data =>
-                    {
-                        var versions = (IReadOnlyList<Version>)data.Select(datum => datum.Item2).ToList();
-                        if (versions.Count != 1)
-                        {
-                            var description = string.Join(", ", versions.Select(x => x.ToString()));
-                            throw new InvalidDataException(
-                                $"Unexpectedly had not-exactly-one version desired for framework {data.Key}: {description}");
-                        }
-
-                        return (data.Key, versions[0]);
-                    })
-                    .ToDictionary();
+                desiredVersions = SoleVersionPerFramework(options.Frameworks);
             }
             else
             {
-                var result = new Dictionary<string, Version>
-                    { { options.Framework.Name, new Version(options.Framework.Version) } };
-                desiredVersions = result;
+                desiredVersions = new Dictionary<string, RequestedFramework>
+                {
+                    { options.Framework.Name, RequestedFramework.Of(options.Framework) }
+                };
             }
         }
         else
         {
-            desiredVersions = options.IncludedFrameworks.Select(x => (x.Name, new Version(x.Version)))
-                .GroupBy(x => x.Name)
-                .Select(data =>
-                {
-                    var versions = (IReadOnlyList<Version>)data.Select(datum => datum.Item2).ToList();
-                    if (versions.Count != 1)
-                    {
-                        var description = string.Join(", ", versions.Select(x => x.ToString()));
-                        throw new InvalidDataException(
-                            $"Unexpectedly had not-exactly-one version desired for framework {data.Key}: {description}");
-                    }
-
-                    return (data.Key, versions[0]);
-                })
-                .ToDictionary();
+            desiredVersions = SoleVersionPerFramework(options.IncludedFrameworks);
         }
+
+        if (rollForward == RollForward.Disable)
+            // hostfxr's "exact" compatibility range consults no list of versions: fx_resolver.cpp
+            // appends the requested version string to the framework directory and takes that directory
+            // or nothing. So none of what follows applies to it -- no version is parsed, none is
+            // rejected for ranking below the request, and a release is not preferred to a prerelease.
+            return desiredVersions
+                .Select(desired => (desired.Key, ExactDirectoryFor(desired.Key, desired.Value, env)))
+                .ToDictionary();
 
         IReadOnlyDictionary<string, IReadOnlyList<RuntimeOnDisk>> availableRuntimes = env
             .Frameworks.SelectMany(availableFramework =>
             {
-                var availableVersion = new Version(availableFramework.Version);
+                // hostfxr skips an installed framework whose version string it cannot parse, rather than
+                // failing: fx_resolver.cpp pushes onto its version_list only when fx_ver_t::parse succeeds.
+                // So one unrecognisable directory name does not make every lookup fail.
+                var availableVersion = FxVersion.ParseOrNull(availableFramework.Version);
+                if (availableVersion is null) return [];
+
                 if (!desiredVersions.TryGetValue(availableFramework.Name, out var desiredVersion))
                 {
                     // we don't desire this framework at any version; skip it
                     return [];
                 }
 
-                if (availableVersion < desiredVersion)
+                if (availableVersion < desiredVersion.ParsedVersion)
                 {
                     // It's never desired to roll *backward*.
                     return [];
                 }
-                return new List<(string, DotnetEnvironmentFrameworkInfo)>
-                    { (availableFramework.Name, availableFramework) };
+
+                return new List<(string, RuntimeOnDisk)>
+                    { (availableFramework.Name, new RuntimeOnDisk(availableFramework, availableVersion)) };
             }).GroupBy(x => x.Item1)
-            .Select(group =>
-            {
-                var grouping = group.Select(x => new RuntimeOnDisk(x.Item2, new Version(x.Item2.Version))).ToList();
-                return (group.Key, (IReadOnlyList<RuntimeOnDisk>)grouping);
-            })
+            .Select(group => (group.Key, (IReadOnlyList<RuntimeOnDisk>)group.Select(x => x.Item2).ToList()))
             .ToDictionary();
 
-        switch (rollForward)
+        var rollForwardToPrerelease = RollForwardToPrereleaseFromEnv();
+
+        return desiredVersions.Select(desired =>
         {
-            case RollForward.Minor:
-            {
-                return desiredVersions.Select(desired =>
-                {
-                    if (!availableRuntimes.TryGetValue(desired.Key, out var available))
-                    {
-                        return (desired.Key, new DotnetRuntimeSelection());
-                    }
+            if (!availableRuntimes.TryGetValue(desired.Key, out var available))
+                // Nothing installed for this framework is at or above the requested version, or nothing is
+                // installed for it at all.
+                return (desired.Key, new DotnetRuntimeSelection());
 
-                    if (ReferenceEquals(available, null))
-                    {
-                        throw new NullReferenceException("logic error: contents of non-nullable dict can't be null");
-                    }
-
-                    // If there's a correct major and minor version, take the latest patch.
-                    var correctMajorAndMinorVersion =
-                        available.Where(data =>
-                            data.InstalledVersion.Major == desired.Value.Major &&
-                            data.InstalledVersion.Minor == desired.Value.Minor).ToList();
-                    if (correctMajorAndMinorVersion.Count > 0)
-                    {
-                        return (desired.Key, new DotnetRuntimeSelection(correctMajorAndMinorVersion.MaxBy(v => v.InstalledVersion)!.Installed));
-                    }
-
-                    // Otherwise roll forward to lowest higher minor version
-                    var candidate = available.Where(data => data.InstalledVersion.Major == desired.Value.Major)
-                        .MinBy(v => (v.InstalledVersion.Minor, -v.InstalledVersion.Build));
-
-                    return (desired.Key, candidate == null ? new DotnetRuntimeSelection() : new DotnetRuntimeSelection(candidate.Installed));
-                }).ToDictionary();
-            }
-            case RollForward.Major:
+            // hostfxr's runtime_config.cpp gives a framework reference prefer_release when the requested
+            // version is a release and DOTNET_ROLL_FORWARD_TO_PRERELEASE is not set. Such a reference
+            // searches the release versions on their own first and only falls back to the whole list when
+            // that finds nothing, which is what stops an installed preview displacing a release.
+            if (!desired.Value.ParsedVersion.IsPrerelease && !rollForwardToPrerelease)
             {
-                // hostfxr (fx_resolver.cpp) admits every installed version at or above the requested one,
-                // whatever its major, and keeps the lowest of them; it then rolls to the highest patch at that
-                // major.minor. So when the requested major is installed this is exactly Minor, and when it is
-                // absent the answer is the lowest higher major at its lowest installed minor.
-                return desiredVersions.Select(desired =>
-                {
-                    if (!availableRuntimes.TryGetValue(desired.Key, out var available))
-                    {
-                        return (desired.Key, new DotnetRuntimeSelection());
-                    }
+                var releaseOnly = available.Where(r => !r.InstalledVersion.IsPrerelease).ToList();
+                var releaseMatch = SearchForBestFrameworkMatch(rollForward, desired.Value, releaseOnly);
+                if (releaseMatch != null)
+                    return (desired.Key, new DotnetRuntimeSelection(releaseMatch.Installed));
+            }
 
-                    // availableRuntimes holds only versions at or above the desired one, and only for frameworks
-                    // with at least one such version, so the group is non-empty.
-                    var lowest = available.MinBy(data => data.InstalledVersion) ??
-                                 throw new InvalidOperationException(
-                                     "logic error: every framework in availableRuntimes has at least one version");
+            var match = SearchForBestFrameworkMatch(rollForward, desired.Value, available);
+            return (desired.Key,
+                match == null ? new DotnetRuntimeSelection() : new DotnetRuntimeSelection(match.Installed));
+        }).ToDictionary();
+    }
 
-                    var latestPatch = available
-                        .Where(data =>
-                            data.InstalledVersion.Major == lowest.InstalledVersion.Major &&
-                            data.InstalledVersion.Minor == lowest.InstalledVersion.Minor)
-                        .MaxBy(data => data.InstalledVersion)!;
+    /// <summary>
+    ///     The installed framework which hostfxr's exact compatibility range resolves
+    ///     <paramref name="desired" /> to: the one living in the directory the requested version names.
+    /// </summary>
+    /// <remarks>
+    ///     hostfxr asks the filesystem for that name rather than comparing it against anything; by contrast,
+    ///     we expose a pure function.
+    ///     We use a case-insensitive comparsion unconditionally, so on a case-sensitive filesystem,
+    ///     we will fail to distinguish versions that hostfxr does distinguish.
+    /// </remarks>
+    private static DotnetRuntimeSelection ExactDirectoryFor(string name, RequestedFramework desired,
+        DotnetEnvironmentInfo env)
+    {
+        DotnetEnvironmentFrameworkInfo? caseVariant = null;
 
-                    return (desired.Key, new DotnetRuntimeSelection(latestPatch.Installed));
-                }).ToDictionary();
-            }
-            case RollForward.LatestPatch:
-            {
-                return desiredVersions.Select(desired =>
-                {
-                    var matches = availableRuntimes[desired.Key]
-                        .Where(data =>
-                            data.InstalledVersion.Minor == desired.Value.Minor &&
-                            data.InstalledVersion.Major == desired.Value.Major).MaxBy(data => data.InstalledVersion);
-                    return matches == null
-                        ? (desired.Key, new DotnetRuntimeSelection())
-                        : (desired.Key, new DotnetRuntimeSelection(matches.Installed));
-                }).ToDictionary();
-            }
-            case RollForward.LatestMinor:
-            {
-                return desiredVersions.Select(desired =>
-                {
-                    var matches = availableRuntimes[desired.Key]
-                        .Where(data =>
-                            data.InstalledVersion.Major == desired.Value.Major).MaxBy(data => data.InstalledVersion);
-                    return matches == null
-                        ? (desired.Key, new DotnetRuntimeSelection())
-                        : (desired.Key, new DotnetRuntimeSelection(matches.Installed));
-                }).ToDictionary();
-            }
-            case RollForward.LatestMajor:
-            {
-                return desiredVersions.Select(desired =>
-                {
-                    var match = availableRuntimes[desired.Key].MaxBy(data => data.InstalledVersion);
-                    return match == null ? (desired.Key, new DotnetRuntimeSelection()) : (desired.Key, new DotnetRuntimeSelection(match.Installed));
-                }).ToDictionary();
-            }
-            case RollForward.Disable:
-            {
-                return desiredVersions.Select(desired =>
-                    {
-                        var exactMatch = availableRuntimes[desired.Key]
-                            .FirstOrDefault(available => available.InstalledVersion == desired.Value);
-                        if (exactMatch != null)
-                        {
-                            return (desired.Key, new DotnetRuntimeSelection(exactMatch.Installed));
-                        }
-                        else
-                        {
-                            return (desired.Key, new DotnetRuntimeSelection());
-                        }
-                    }
-                ).ToDictionary();
-            }
-            default:
-            {
-                throw new ArgumentOutOfRangeException();
-            }
+        foreach (var candidate in env.Frameworks)
+        {
+            if (!string.Equals(candidate.Name, name, StringComparison.Ordinal)) continue;
+
+            if (string.Equals(candidate.Version, desired.Version, StringComparison.Ordinal))
+                return new DotnetRuntimeSelection(candidate);
+
+            if (caseVariant is null
+                && string.Equals(candidate.Version, desired.Version, StringComparison.OrdinalIgnoreCase))
+                caseVariant = candidate;
         }
+
+        return caseVariant is null ? new DotnetRuntimeSelection() : new DotnetRuntimeSelection(caseVariant);
+    }
+
+    /// <summary>
+    ///     The version each named framework is requested at, rejecting a list which names one framework more
+    ///     than once.
+    /// </summary>
+    private static IReadOnlyDictionary<string, RequestedFramework> SoleVersionPerFramework(
+        IReadOnlyList<RuntimeConfigFramework> frameworks)
+    {
+        return frameworks
+            .GroupBy(x => x.Name)
+            .Select(data =>
+            {
+                var requested = data.ToList();
+                if (requested.Count != 1)
+                    throw new InvalidDataException(
+                        $"Unexpectedly had not-exactly-one version desired for framework {data.Key}: {string.Join(", ", requested.Select(x => x.Version))}");
+
+                return (data.Key, RequestedFramework.Of(requested[0]));
+            })
+            .ToDictionary();
+    }
+
+    /// <summary>
+    ///     The version hostfxr's <c>search_for_best_framework_match</c> picks out of
+    ///     <paramref name="available" />, which holds exactly those installed versions at or above
+    ///     <paramref name="desired" />.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         Two phases. First the policy's compatibility range says which candidates are admissible,
+    ///         and the lowest of them is taken -- or the highest, for the policies which set hostfxr's
+    ///         <c>roll_to_highest_version</c>. Then <c>automatic_roll_to_latest_patch</c> moves to the
+    ///         highest patch at that major.minor, except from a prerelease, where hostfxr keeps the
+    ///         closest match rather than rolling.
+    ///     </para>
+    ///     <para>
+    ///         The only way a tie can happen is if two candidates differ only in build metadata.
+    ///         hostfxr's choice in that case is undefined, being derived as the last element of a list built by walking <c>readdir</c>, whose order is undefined.
+    ///         The list we are handed instead came from <c>hostfxr_get_dotnet_environment_info</c>, which
+    ///         <c>std::sort</c>s by precedence, and that sort is not stable, so even the order of the tied
+    ///         pair we receive is unspecified. There is no order here to agree with. We keep the first, so
+    ///         that our answer is at least a function of our input.
+    ///     </para>
+    /// </remarks>
+    /// <returns>The chosen runtime, or null when the policy admits none of the candidates.</returns>
+    private static RuntimeOnDisk? SearchForBestFrameworkMatch(RollForward rollForward,
+        RequestedFramework desired, IReadOnlyList<RuntimeOnDisk> available)
+    {
+        var admissible = available
+            .Where(a => WithinCompatibilityRange(rollForward, desired.ParsedVersion, a.InstalledVersion))
+            .ToList();
+
+        // LatestMinor and LatestMajor are the policies which set roll_to_highest_version. It has no effect
+        // on the patch range, which hostfxr excludes explicitly, and LatestPatch is that range.
+        var preferHigher = rollForward is RollForward.LatestMinor or RollForward.LatestMajor;
+
+        // Both phases are folds which move off the incumbent only for a strict improvement, so a tie
+        // leaves the earlier candidate standing.
+        RuntimeOnDisk? best = null;
+        foreach (var candidate in admissible)
+            if (best is null
+                || (preferHigher
+                    ? candidate.InstalledVersion > best.InstalledVersion
+                    : candidate.InstalledVersion < best.InstalledVersion))
+                best = candidate;
+
+        if (best is null) return null;
+
+        // "If we've found a pre-release version match, then don't apply automatic roll to latest patch."
+        if (best.InstalledVersion.IsPrerelease) return best;
+
+        // Seeding with best rather than with the first candidate is safe: it is one of the candidates here.
+        // Depending on the policy's ordering, it's either
+        // already the winner or it ties for last among the versions with this major/minor.
+        var latestPatch = best;
+        foreach (var candidate in admissible)
+            if (candidate.InstalledVersion.Major == best.InstalledVersion.Major
+                && candidate.InstalledVersion.Minor == best.InstalledVersion.Minor
+                && candidate.InstalledVersion > latestPatch.InstalledVersion)
+                latestPatch = candidate;
+
+        return latestPatch;
+    }
+
+    /// <summary>
+    ///     Whether <paramref name="candidate" /> is within the version compatibility range which
+    ///     <paramref name="rollForward" /> selects, given that it is already at or above
+    ///     <paramref name="desired" />.
+    /// </summary>
+    private static bool WithinCompatibilityRange(RollForward rollForward, FxVersion desired, FxVersion candidate)
+    {
+        return rollForward switch
+        {
+            RollForward.LatestPatch => candidate.Major == desired.Major && candidate.Minor == desired.Minor,
+            RollForward.Minor or RollForward.LatestMinor => candidate.Major == desired.Major,
+            RollForward.Major or RollForward.LatestMajor => true,
+            RollForward.Disable => throw new InvalidOperationException(
+                "logic error: the exact compatibility range does not consult the version list"),
+            _ => throw new ArgumentOutOfRangeException(nameof(rollForward), rollForward,
+                "unrecognised roll-forward policy")
+        };
+    }
+
+    /// <summary>
+    ///     Whether DOTNET_ROLL_FORWARD_TO_PRERELEASE asks for prerelease versions to be considered on an
+    ///     equal footing with releases, as hostfxr's runtime_config.cpp reads it: <c>pal::getenv</c> reports
+    ///     an empty variable as unset, and the value goes through <c>atoi</c>, which skips leading
+    ///     whitespace, takes an optional sign and the leading run of digits, and yields 0 when there are
+    ///     none. Only the value 1 turns the preference off.
+    /// </summary>
+    private static bool RollForwardToPrereleaseFromEnv()
+    {
+        var value = Environment.GetEnvironmentVariable("DOTNET_ROLL_FORWARD_TO_PRERELEASE");
+        if (string.IsNullOrEmpty(value)) return false;
+
+        var i = 0;
+        // The whitespace atoi skips is the C locale's isspace, not Unicode's.
+        while (i < value.Length && value[i] is ' ' or '\t' or '\n' or '\v' or '\f' or '\r') i++;
+
+        var negated = false;
+        if (i < value.Length && value[i] is '+' or '-')
+        {
+            negated = value[i] == '-';
+            i++;
+        }
+
+        long accumulated = 0;
+        var digitsStart = i;
+        while (i < value.Length && value[i] is >= '0' and <= '9')
+        {
+            accumulated = accumulated * 10 + (value[i] - '0');
+            // Anything this large is not 1, so stop rather than model atoi's overflow.
+            if (accumulated > int.MaxValue) return false;
+            i++;
+        }
+
+        if (i == digitsStart) return false;
+
+        return !negated && accumulated == 1;
     }
 
     private static JsonSerializerOptions _options = new() {PropertyNameCaseInsensitive = true, Converters = { new JsonStringEnumConverter<RollForward>() }};
@@ -397,5 +461,23 @@ public static class DotnetRuntime
 
     private record RuntimeOnDisk(
         DotnetEnvironmentFrameworkInfo Installed,
-        Version InstalledVersion);
+        FxVersion InstalledVersion);
+
+    /// <summary>
+    ///     A framework reference from the runtimeconfig, keeping the requested version both as written
+    ///     and as parsed -- as hostfxr's <c>fx_reference_t</c> keeps <c>fx_version</c> beside
+    ///     <c>fx_version_number</c>, because the exact/Disable path matches the directory name against
+    ///     the string while every roll-forward path compares precedence.
+    /// </summary>
+    /// <param name="Version">The version exactly as the runtimeconfig spelled it.</param>
+    /// <param name="ParsedVersion">That version parsed, for the precedence comparisons.</param>
+    private record RequestedFramework(string Version, FxVersion ParsedVersion)
+    {
+        public static RequestedFramework Of(RuntimeConfigFramework framework)
+        {
+            return new RequestedFramework(
+                framework.Version,
+                FxVersion.Parse(framework.Version, $"framework '{framework.Name}'"));
+        }
+    }
 }

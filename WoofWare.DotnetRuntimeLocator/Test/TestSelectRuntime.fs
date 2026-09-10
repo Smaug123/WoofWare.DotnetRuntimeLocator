@@ -13,8 +13,9 @@ open WoofWare.DotnetRuntimeLocator
 /// or above the requested one which the policy's compatibility range allows (any major for `Major`,
 /// the requested major for `Minor`, ...) and keeps the lowest of them, or the highest for the
 /// `Latest*` policies; `automatic_roll_to_latest_patch` then moves to the highest patch at that
-/// major.minor. Pre-release versions are outside what this library models (`System.Version`
-/// cannot hold one), so nothing here exercises them.
+/// major.minor. Pre-release versions order below the release of the same three components, and a
+/// framework reference for a release version searches the release versions alone before falling back
+/// to the whole list, which is hostfxr's `prefer_release`.
 [<TestFixture>]
 module TestSelectRuntime =
 
@@ -254,3 +255,364 @@ module TestSelectRuntime =
                 Version(Path.GetFileName framework).Major |> shouldBeGreaterThan 7
         finally
             Directory.Delete (dir, true)
+
+    /// The version `SelectRuntime` picks, as the string it was installed under, so that a prerelease
+    /// label survives the comparison.
+    let private selectVersion (options : RuntimeOptions) (env : DotnetEnvironmentInfo) : string option =
+        let selection = DotnetRuntime.SelectRuntime (options, env)
+
+        selection.[frameworkName]
+            .Visit (
+                (fun framework -> Some framework.Version),
+                (fun sdk -> failwith $"unexpectedly selected an SDK: %O{sdk}"),
+                (fun () -> None)
+            )
+
+    /// Run `f` with `DOTNET_ROLL_FORWARD_TO_PRERELEASE` set to `value` (or unset), restoring it after.
+    let private withPrereleaseEnv (value : string option) (f : unit -> 'a) : 'a =
+        let name = "DOTNET_ROLL_FORWARD_TO_PRERELEASE"
+        let previous = Environment.GetEnvironmentVariable name
+
+        try
+            Environment.SetEnvironmentVariable (name, Option.toObj value)
+            f ()
+        finally
+            Environment.SetEnvironmentVariable (name, previous)
+
+    /// The motivating regression: `System.Version` cannot parse a prerelease, so every lookup threw
+    /// as soon as any prerelease framework was installed -- even one of an unrelated major, and even
+    /// for an app which asked for a release version.
+    [<Test>]
+    let ``an installed prerelease does not disturb an unrelated request`` () =
+        installed [ "11.0.0-preview.7.26381.103" ; "9.0.5" ; "9.0.2" ]
+        |> selectVersion (requesting RollForward.Minor "9.0.0")
+        |> shouldEqual (Some "9.0.5")
+
+    /// 9.0.6-preview.1 is the highest patch at 9.0, so the patch roll-forward would land on it; the
+    /// release preference is what keeps a release request on a release.
+    [<Test>]
+    [<NonParallelizable>]
+    let ``a release request prefers a release to a higher prerelease`` () =
+        withPrereleaseEnv
+            None
+            (fun () ->
+                installed [ "9.0.5" ; "9.0.6-preview.1" ]
+                |> selectVersion (requesting RollForward.Minor "9.0.0")
+                |> shouldEqual (Some "9.0.5")
+            )
+
+    /// hostfxr's release-only search is a first pass, not a filter: when it finds nothing the whole
+    /// list is searched again.
+    [<Test>]
+    [<NonParallelizable>]
+    let ``a release request falls back to a prerelease when no release will do`` () =
+        withPrereleaseEnv
+            None
+            (fun () ->
+                installed [ "9.0.6-preview.1" ; "8.0.10" ]
+                |> selectVersion (requesting RollForward.Minor "9.0.0")
+                |> shouldEqual (Some "9.0.6-preview.1")
+            )
+
+    /// `DOTNET_ROLL_FORWARD_TO_PRERELEASE=1` clears the preference, so the same environment and
+    /// request now roll onto the prerelease.
+    [<Test>]
+    [<NonParallelizable>]
+    let ``DOTNET_ROLL_FORWARD_TO_PRERELEASE removes the release preference`` () =
+        let selectHere () =
+            installed [ "9.0.5" ; "9.0.6-preview.1" ]
+            |> selectVersion (requesting RollForward.Minor "9.0.0")
+
+        withPrereleaseEnv (Some "1") selectHere |> shouldEqual (Some "9.0.6-preview.1")
+
+    /// hostfxr reads the variable with `atoi` and tests the result against 1, so anything whose
+    /// leading integer is not 1 leaves the preference in place; an empty variable is unset.
+    [<TestCase("0")>]
+    [<TestCase("2")>]
+    [<TestCase("-1")>]
+    [<TestCase("")>]
+    [<TestCase("true")>]
+    [<TestCase("x1")>]
+    [<NonParallelizable>]
+    let ``DOTNET_ROLL_FORWARD_TO_PRERELEASE takes only the value 1`` (value : string) =
+        withPrereleaseEnv
+            (Some value)
+            (fun () ->
+                installed [ "9.0.5" ; "9.0.6-preview.1" ]
+                |> selectVersion (requesting RollForward.Minor "9.0.0")
+            )
+        |> shouldEqual (Some "9.0.5")
+
+    /// `atoi` skips leading whitespace and accepts a leading '+', and stops at the first non-digit,
+    /// so all of these are the value 1.
+    [<TestCase(" 1")>]
+    [<TestCase("+1")>]
+    [<TestCase("1x")>]
+    [<TestCase("\t1.9")>]
+    [<NonParallelizable>]
+    let ``DOTNET_ROLL_FORWARD_TO_PRERELEASE reads its value as atoi does`` (value : string) =
+        withPrereleaseEnv
+            (Some value)
+            (fun () ->
+                installed [ "9.0.5" ; "9.0.6-preview.1" ]
+                |> selectVersion (requesting RollForward.Minor "9.0.0")
+            )
+        |> shouldEqual (Some "9.0.6-preview.1")
+
+    /// `automatic_roll_to_latest_patch` is skipped when the best match is a prerelease: "for
+    /// pre-release we will only roll to closest available". So a prerelease request stays put rather
+    /// than climbing to the release at the same major.minor.
+    [<Test>]
+    let ``a prerelease request does not roll to the latest patch`` () =
+        installed [ "9.0.0-preview.1" ; "9.0.0-preview.5" ; "9.0.0" ]
+        |> selectVersion (requesting RollForward.LatestPatch "9.0.0-preview.1")
+        |> shouldEqual (Some "9.0.0-preview.1")
+
+    /// A prerelease request still rolls forward to a later prerelease when its own is absent, because
+    /// the two-phase search picks the lowest admissible version.
+    [<Test>]
+    let ``a prerelease request rolls forward to the closest available`` () =
+        installed [ "9.0.0-preview.5" ; "9.0.0" ]
+        |> selectVersion (requesting RollForward.LatestPatch "9.0.0-preview.1")
+        |> shouldEqual (Some "9.0.0-preview.5")
+
+    /// hostfxr pushes onto its version list only what `fx_ver_t::parse` accepted, so a directory it
+    /// cannot read is skipped rather than fatal.
+    [<Test>]
+    let ``an unparseable installed version is skipped`` () =
+        installed [ "9.0.5" ; "not-a-version" ; "9.0" ; "" ]
+        |> selectVersion (requesting RollForward.Minor "9.0.0")
+        |> shouldEqual (Some "9.0.5")
+
+    /// A version the host could not parse in the app's own runtimeconfig is the app's bug, and
+    /// silently treating it as "no constraint" -- which is what hostfxr's release builds do, since it
+    /// ignores the result of the parse -- would pick an arbitrary runtime.
+    [<Test>]
+    let ``an unparseable requested version is rejected`` () =
+        let exn =
+            Assert.Throws<FormatException> (fun () ->
+                installed [ "9.0.5" ]
+                |> selectVersion (requesting RollForward.Minor "9.0")
+                |> ignore
+            )
+
+        exn.Message |> shouldContainText frameworkName
+        exn.Message |> shouldContainText "9.0"
+
+    /// All six policies over one environment, so that the compatibility range each of them selects is
+    /// pinned in one place. The requested version is installed here, which is the case in which the
+    /// ranges differ only by how far above it they are willing to look.
+    [<Test>]
+    let ``each policy looks exactly as far as its compatibility range`` () =
+        let env = installed [ "10.0.7" ; "9.2.0" ; "9.1.5" ; "9.1.2" ; "9.1.0" ]
+
+        let expected =
+            [
+                RollForward.Disable, Some "9.1.0"
+                RollForward.LatestPatch, Some "9.1.5"
+                RollForward.Minor, Some "9.1.5"
+                RollForward.LatestMinor, Some "9.2.0"
+                RollForward.Major, Some "9.1.5"
+                RollForward.LatestMajor, Some "10.0.7"
+            ]
+
+        for policy, answer in expected do
+            env |> selectVersion (requesting policy "9.1.0") |> shouldEqual answer
+
+    /// The same six policies when the requested major is absent, which is the only case separating
+    /// `Minor` from `Major` and `LatestMinor` from `LatestMajor`: the minor-ranged policies refuse to
+    /// cross a major boundary, and the major-ranged ones do it.
+    [<Test>]
+    let ``only the major-ranged policies cross a major boundary`` () =
+        let env = installed [ "10.0.7" ; "9.2.0" ; "9.1.5" ; "9.1.2" ]
+
+        let expected =
+            [
+                RollForward.Disable, None
+                RollForward.LatestPatch, None
+                RollForward.Minor, None
+                RollForward.LatestMinor, None
+                RollForward.Major, Some "9.1.5"
+                RollForward.LatestMajor, Some "10.0.7"
+            ]
+
+        for policy, answer in expected do
+            env |> selectVersion (requesting policy "8.0.0") |> shouldEqual answer
+
+    /// hostfxr's exact compatibility range never parses or compares versions: `fx_resolver.cpp`
+    /// appends the requested version *string* to the framework directory and takes that directory or
+    /// nothing. So `Disable` is spelled-out string equality, not precedence -- and the two differ
+    /// exactly when build metadata is in play, since build metadata takes no part in precedence.
+    [<Test>]
+    let ``Disable matches the requested version's spelling, not its precedence`` () =
+        // hostfxr would look for a directory named "9.0.5" and not find one.
+        installed [ "9.0.5+custom" ]
+        |> selectVersion (requesting RollForward.Disable "9.0.5")
+        |> shouldEqual None
+
+        // ... and here it finds "9.0.5" itself, not the one which merely ranks the same.
+        installed [ "9.0.5+custom" ; "9.0.5" ]
+        |> selectVersion (requesting RollForward.Disable "9.0.5")
+        |> shouldEqual (Some "9.0.5")
+
+    /// The same distinction when the requested version is itself carrying build metadata: the
+    /// directory hostfxr looks for is the whole string, so an installed version of equal precedence
+    /// listed earlier must not be taken in its place.
+    [<Test>]
+    let ``Disable picks the requested build, not one of equal precedence`` () =
+        installed [ "9.0.5+other" ; "9.0.5+expected" ]
+        |> selectVersion (requesting RollForward.Disable "9.0.5+expected")
+        |> shouldEqual (Some "9.0.5+expected")
+
+        installed [ "9.0.5+other" ]
+        |> selectVersion (requesting RollForward.Disable "9.0.5+expected")
+        |> shouldEqual None
+
+    /// hostfxr never compares the request against the installed list: it appends the requested
+    /// spelling to the framework directory and asks the filesystem for that name. A filesystem which
+    /// ignores case answers yes to a directory differing from the request only in case, so `Disable`
+    /// there resolves a runtime which an ordinal comparison would have refused.
+    [<Test>]
+    let ``Disable matches the installed spelling case-insensitively`` () =
+        installed [ "9.0.0-preview.1" ]
+        |> selectVersion (requesting RollForward.Disable "9.0.0-PREVIEW.1")
+        |> shouldEqual (Some "9.0.0-preview.1")
+
+        // The other direction is the one precedence rejects even earlier: "PREVIEW" sorts below
+        // "preview", so the installed version ranks below the request and the never-roll-backward
+        // filter drops it before any spelling is compared. The exact range does no ranking at all.
+        installed [ "9.0.0-PREVIEW.1" ]
+        |> selectVersion (requesting RollForward.Disable "9.0.0-preview.1")
+        |> shouldEqual (Some "9.0.0-PREVIEW.1")
+
+    /// Only a case-sensitive filesystem can hold both spellings at once, and there the request names
+    /// exactly one of them.
+    [<Test>]
+    let ``Disable prefers the exact spelling to a case variant`` () =
+        installed [ "9.0.5+EXPECTED" ; "9.0.5+expected" ]
+        |> selectVersion (requesting RollForward.Disable "9.0.5+expected")
+        |> shouldEqual (Some "9.0.5+expected")
+
+        installed [ "9.0.5+expected" ; "9.0.5+EXPECTED" ]
+        |> selectVersion (requesting RollForward.Disable "9.0.5+EXPECTED")
+        |> shouldEqual (Some "9.0.5+EXPECTED")
+
+    /// Two installed versions tie only by differing in build metadata. hostfxr's own answer then
+    /// depends on the order `readdir` gave its resolver, and the list we are handed came from a
+    /// different code path which `std::sort`s by precedence -- an unstable sort, so even the order of
+    /// the tied pair we receive is unspecified. So there is no hostfxr answer to match here; what we
+    /// owe the caller is that we pick one of them, and pick the same one every time.
+    [<Test>]
+    let ``a build-metadata tie resolves to one candidate, deterministically`` () =
+        let env = installed [ "9.0.5+a" ; "9.0.5+b" ]
+
+        let answers =
+            List.replicate 5 ()
+            |> List.map (fun () -> env |> selectVersion (requesting RollForward.Minor "9.0.0"))
+
+        answers |> List.distinct |> List.length |> shouldEqual 1
+
+        match List.head answers with
+        | Some picked -> [ "9.0.5+a" ; "9.0.5+b" ] |> List.contains picked |> shouldEqual true
+        | None -> failwith "expected one of the tied candidates to be selected"
+
+    /// Every policy answers "nothing" for a framework with no installed version at all, rather than
+    /// throwing on a missing dictionary key.
+    [<TestCase(RollForward.Minor)>]
+    [<TestCase(RollForward.Major)>]
+    [<TestCase(RollForward.LatestPatch)>]
+    [<TestCase(RollForward.LatestMinor)>]
+    [<TestCase(RollForward.LatestMajor)>]
+    [<TestCase(RollForward.Disable)>]
+    let ``an uninstalled framework selects nothing`` (rollForward : RollForward) =
+        DotnetEnvironmentInfo ("10.0.0", "0000000", [], [])
+        |> selectVersion (requesting rollForward "9.0.0")
+        |> shouldEqual None
+
+    /// Version strings drawn from a small enough space that ties are common: many pairs share a
+    /// major.minor.patch and differ only in build metadata, which takes no part in precedence. Those
+    /// are the inputs on which the choice among equals is observable at all. Two of the build labels
+    /// differ from each other only in case, which is what `Disable` folds and precedence does not.
+    let private genVersionString : Gen<string> =
+        gen {
+            let! major = Gen.choose (8, 10)
+            let! minor = Gen.choose (0, 2)
+            let! patch = Gen.choose (0, 3)
+            let! build = Gen.elements [ "" ; "+a" ; "+A" ; "+b" ]
+            return $"%d{major}.%d{minor}.%d{patch}%s{build}"
+        }
+
+    let private genPolicy : Gen<RollForward> =
+        Gen.elements (List.ofArray (Enum.GetValues<RollForward> ()))
+
+    /// The element of `xs` which no other element beats under `beats`, taking the earliest such:
+    /// a left fold which moves off its incumbent only for a strict improvement.
+    let private earliestBest (beats : FxVersion -> FxVersion -> bool) (xs : (string * FxVersion) list) =
+        xs
+        |> List.reduce (fun best candidate -> if beats (snd candidate) (snd best) then candidate else best)
+
+    /// hostfxr's search, written out directly over a list rather than as the library writes it, so
+    /// that it is an independent statement of the answer -- ties included. Only release versions are
+    /// generated, so `prefer_release` cannot separate this from the library: it would search a
+    /// release-only sublist which is the whole list.
+    let private reference (policy : RollForward) (requested : string) (versions : string list) : string option =
+        let parsed =
+            versions
+            |> List.choose (fun s -> FxVersion.ParseOrNull s |> Option.ofObj |> Option.map (fun v -> s, v))
+
+        if policy = RollForward.Disable then
+            // The exact range names a directory rather than a version: the requested spelling is
+            // appended to the framework directory and the filesystem asked for it. So no version is
+            // parsed, and a filesystem which ignores case answers a request differing only in case --
+            // though where both spellings are present it is the requested one which is named.
+            let named (comparison : StringComparison) =
+                versions |> List.tryFind (fun s -> String.Equals (s, requested, comparison))
+
+            named StringComparison.Ordinal
+            |> Option.orElseWith (fun () -> named StringComparison.OrdinalIgnoreCase)
+        else
+
+        let want = FxVersion.Parse (requested, "the test's requested framework")
+
+        let inRange (v : FxVersion) =
+            match policy with
+            | RollForward.LatestPatch -> v.Major = want.Major && v.Minor = want.Minor
+            | RollForward.Minor
+            | RollForward.LatestMinor -> v.Major = want.Major
+            | _ -> true
+
+        let admissible = parsed |> List.filter (fun (_, v) -> v >= want && inRange v)
+
+        match admissible with
+        | [] -> None
+        | _ ->
+
+        let best =
+            match policy with
+            | RollForward.LatestMinor
+            | RollForward.LatestMajor -> admissible |> earliestBest (fun c b -> c > b)
+            | _ -> admissible |> earliestBest (fun c b -> c < b)
+
+        if (snd best).IsPrerelease then
+            Some (fst best)
+        else
+
+        admissible
+        |> List.filter (fun (_, v) -> v.Major = (snd best).Major && v.Minor = (snd best).Minor)
+        |> earliestBest (fun c b -> c > b)
+        |> fst
+        |> Some
+
+    /// The two-phase search pinned for every policy at once, and pinned down to which of two tied
+    /// candidates comes back. Precedence alone does not determine that, so without this the choice
+    /// among equals could change under a refactor and no test would notice.
+    [<Test>]
+    let ``every policy agrees with the search written out longhand, ties included`` () =
+        let property (policy : RollForward, requested : string, versions : string list) : unit =
+            let actual = installed versions |> selectVersion (requesting policy requested)
+            actual |> shouldEqual (reference policy requested versions)
+
+        let arb =
+            Arb.fromGen (Gen.zip3 genPolicy genVersionString (Gen.listOf genVersionString))
+
+        Check.One (Config.QuickThrowOnFailure.WithMaxTest 2000, Prop.forAll arb property)
