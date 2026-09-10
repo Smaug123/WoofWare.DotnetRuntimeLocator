@@ -156,7 +156,8 @@ public static class DotnetRuntime
                 // hostfxr skips an installed framework whose version string it cannot parse, rather than
                 // failing: fx_resolver.cpp pushes onto its version_list only when fx_ver_t::parse succeeds.
                 // So one unrecognisable directory name does not make every lookup fail.
-                if (!FxVersion.TryParse(availableFramework.Version, out var availableVersion)) return [];
+                var availableVersion = FxVersion.ParseOrNull(availableFramework.Version);
+                if (availableVersion is null) return [];
 
                 if (!desiredVersions.TryGetValue(availableFramework.Name, out var desiredVersion))
                 {
@@ -164,14 +165,14 @@ public static class DotnetRuntime
                     return [];
                 }
 
-                if (availableVersion! < desiredVersion.ParsedVersion)
+                if (availableVersion < desiredVersion.ParsedVersion)
                 {
                     // It's never desired to roll *backward*.
                     return [];
                 }
 
                 return new List<(string, RuntimeOnDisk)>
-                    { (availableFramework.Name, new RuntimeOnDisk(availableFramework, availableVersion!)) };
+                    { (availableFramework.Name, new RuntimeOnDisk(availableFramework, availableVersion)) };
             }).GroupBy(x => x.Item1)
             .Select(group => (group.Key, (IReadOnlyList<RuntimeOnDisk>)group.Select(x => x.Item2).ToList()))
             .ToDictionary();
@@ -263,21 +264,41 @@ public static class DotnetRuntime
         var admissible = available
             .Where(a => WithinCompatibilityRange(rollForward, desired.ParsedVersion, a.InstalledVersion))
             .ToList();
-        if (admissible.Count == 0) return null;
 
         // LatestMinor and LatestMajor are the policies which set roll_to_highest_version. It has no effect
         // on the patch range, which hostfxr excludes explicitly, and LatestPatch is that range.
-        var best = rollForward is RollForward.LatestMinor or RollForward.LatestMajor
-            ? admissible.MaxBy(a => a.InstalledVersion)!
-            : admissible.MinBy(a => a.InstalledVersion)!;
+        var preferHigher = rollForward is RollForward.LatestMinor or RollForward.LatestMajor;
+
+        // Both phases are folds which move off the incumbent only for a strict improvement, so a tie
+        // leaves the earlier candidate standing, which is what MaxBy and MinBy did. Spelling them out
+        // is what makes the answer non-null to the compiler rather than to the reader: this phase
+        // starts from nothing and is checked for it, and the next starts from a value in hand.
+        RuntimeOnDisk? best = null;
+        foreach (var candidate in admissible)
+            if (best is null
+                || (preferHigher
+                    ? candidate.InstalledVersion > best.InstalledVersion
+                    : candidate.InstalledVersion < best.InstalledVersion))
+                best = candidate;
+
+        if (best is null) return null;
 
         // "If we've found a pre-release version match, then don't apply automatic roll to latest patch."
         if (best.InstalledVersion.IsPrerelease) return best;
 
-        return admissible
-            .Where(a => a.InstalledVersion.Major == best.InstalledVersion.Major
-                        && a.InstalledVersion.Minor == best.InstalledVersion.Minor)
-            .MaxBy(a => a.InstalledVersion)!;
+        // Seeding with best rather than with the first candidate is safe, and it is what supplies the
+        // starting value the compiler wants. best is itself at its own major.minor, so it is one of the
+        // candidates here; and its version is the extreme of the admissible list in whichever direction
+        // the policy asked for, so among these candidates it either already wins outright or ties for
+        // last. Either way it cannot displace the earliest candidate that this phase should return.
+        var latestPatch = best;
+        foreach (var candidate in admissible)
+            if (candidate.InstalledVersion.Major == best.InstalledVersion.Major
+                && candidate.InstalledVersion.Minor == best.InstalledVersion.Minor
+                && candidate.InstalledVersion > latestPatch.InstalledVersion)
+                latestPatch = candidate;
+
+        return latestPatch;
     }
 
     /// <summary>
@@ -313,7 +334,7 @@ public static class DotnetRuntime
 
         var i = 0;
         // The whitespace atoi skips is the C locale's isspace, not Unicode's.
-        while (i < value!.Length && value[i] is ' ' or '\t' or '\n' or '\v' or '\f' or '\r') i++;
+        while (i < value.Length && value[i] is ' ' or '\t' or '\n' or '\v' or '\f' or '\r') i++;
 
         var negated = false;
         if (i < value.Length && value[i] is '+' or '-')

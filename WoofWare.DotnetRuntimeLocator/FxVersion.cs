@@ -196,21 +196,19 @@ internal sealed class FxVersion : IComparable<FxVersion>, IComparable, IEquatabl
     ///     Parse a version string as hostfxr's <c>fx_ver_t::parse</c> does.
     /// </summary>
     /// <param name="s">The version string, for example "9.0.5" or "11.0.0-preview.7.26381.103".</param>
-    /// <param name="version">The parsed version, when this returns true.</param>
-    /// <returns>Whether <paramref name="s" /> is a version hostfxr would accept.</returns>
-    public static bool TryParse(string? s, out FxVersion? version)
+    /// <returns>The parsed version, or null when <paramref name="s" /> is not one hostfxr would accept.</returns>
+    public static FxVersion? ParseOrNull(string? s)
     {
-        version = null;
-        if (string.IsNullOrEmpty(s)) return false;
+        if (string.IsNullOrEmpty(s)) return null;
 
-        var majDot = s!.IndexOf('.');
-        if (majDot < 0) return false;
-        if (!TryParseComponent(s, 0, majDot, out var major)) return false;
+        var majDot = s.IndexOf('.');
+        if (majDot < 0) return null;
+        if (!TryParseComponent(s, 0, majDot, out var major)) return null;
 
         var minStart = majDot + 1;
         var minDot = s.IndexOf('.', minStart);
-        if (minDot < 0) return false;
-        if (!TryParseComponent(s, minStart, minDot - minStart, out var minor)) return false;
+        if (minDot < 0) return null;
+        if (!TryParseComponent(s, minStart, minDot - minStart, out var minor)) return null;
 
         var patStart = minDot + 1;
         var patEnd = IndexOfNonNumeric(s, patStart);
@@ -218,13 +216,12 @@ internal sealed class FxVersion : IComparable<FxVersion>, IComparable, IEquatabl
         if (patEnd < 0)
         {
             // The whole remainder is the patch, so there is no prerelease or build label.
-            if (!TryParseComponent(s, patStart, s.Length - patStart, out var wholePatch)) return false;
+            if (!TryParseComponent(s, patStart, s.Length - patStart, out var wholePatch)) return null;
 
-            version = new FxVersion(major, minor, wholePatch, "", "");
-            return true;
+            return new FxVersion(major, minor, wholePatch, "", "");
         }
 
-        if (!TryParseComponent(s, patStart, patEnd - patStart, out var patch)) return false;
+        if (!TryParseComponent(s, patStart, patEnd - patStart, out var patch)) return null;
 
         var preStart = patEnd;
         var buildStart = s.IndexOf('+', preStart);
@@ -232,21 +229,20 @@ internal sealed class FxVersion : IComparable<FxVersion>, IComparable, IEquatabl
 
         if (preLength > 0)
         {
-            if (s[preStart] != '-') return false;
-            if (!ValidDotSeparatedIdentifiers(s, preStart + 1, preLength - 1, false)) return false;
+            if (s[preStart] != '-') return null;
+            if (!ValidDotSeparatedIdentifiers(s, preStart + 1, preLength - 1, false)) return null;
         }
 
         var buildLength = buildStart >= 0 ? s.Length - buildStart : 0;
         if (buildLength > 0 && !ValidDotSeparatedIdentifiers(s, buildStart + 1, buildLength - 1, true))
-            return false;
+            return null;
 
-        version = new FxVersion(
+        return new FxVersion(
             major,
             minor,
             patch,
             s.Substring(preStart, preLength),
             buildStart >= 0 ? s.Substring(buildStart, buildLength) : "");
-        return true;
     }
 
     /// <summary>
@@ -260,7 +256,8 @@ internal sealed class FxVersion : IComparable<FxVersion>, IComparable, IEquatabl
     /// <exception cref="FormatException"><paramref name="s" /> is not a version hostfxr would accept.</exception>
     public static FxVersion Parse(string? s, string describeSubject)
     {
-        if (TryParse(s, out var version)) return version!;
+        var version = ParseOrNull(s);
+        if (version is not null) return version;
 
         throw new FormatException(
             $"The version of {describeSubject} was '{s}', which is not a version the .NET host can parse. "
@@ -350,7 +347,7 @@ internal sealed class FxVersion : IComparable<FxVersion>, IComparable, IEquatabl
         return true;
     }
 
-    /// <summary>The version as hostfxr would render it, which round-trips through <see cref="TryParse" />.</summary>
+    /// <summary>The version as hostfxr would render it, which round-trips through <see cref="ParseOrNull" />.</summary>
     public override string ToString()
     {
         return $"{Major}.{Minor}.{Patch}{Pre}{Build}";

@@ -13,10 +13,7 @@ open WoofWare.DotnetRuntimeLocator
 [<TestFixture>]
 module TestFxVersion =
 
-    let private parse (s : string) : FxVersion option =
-        match FxVersion.TryParse s with
-        | true, v -> Some v
-        | false, _ -> None
+    let private parse (s : string) : FxVersion option = FxVersion.ParseOrNull s |> Option.ofObj
 
     let private parsed (s : string) : FxVersion =
         match parse s with

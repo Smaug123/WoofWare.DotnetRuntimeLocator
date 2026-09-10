@@ -499,3 +499,85 @@ module TestSelectRuntime =
         DotnetEnvironmentInfo ("10.0.0", "0000000", [], [])
         |> selectVersion (requesting rollForward "9.0.0")
         |> shouldEqual None
+
+    /// Version strings drawn from a small enough space that ties are common: many pairs share a
+    /// major.minor.patch and differ only in build metadata, which takes no part in precedence. Those
+    /// are the inputs on which the choice among equals is observable at all.
+    let private genVersionString : Gen<string> =
+        gen {
+            let! major = Gen.choose (8, 10)
+            let! minor = Gen.choose (0, 2)
+            let! patch = Gen.choose (0, 3)
+            let! build = Gen.elements [ "" ; "+a" ; "+b" ]
+            return $"%d{major}.%d{minor}.%d{patch}%s{build}"
+        }
+
+    let private genPolicy : Gen<RollForward> =
+        Gen.elements (List.ofArray (Enum.GetValues<RollForward> ()))
+
+    /// The element of `xs` which no other element beats under `beats`, taking the earliest such:
+    /// a left fold which moves off its incumbent only for a strict improvement.
+    let private earliestBest (beats : FxVersion -> FxVersion -> bool) (xs : (string * FxVersion) list) =
+        xs
+        |> List.reduce (fun best candidate -> if beats (snd candidate) (snd best) then candidate else best)
+
+    /// hostfxr's search, written out directly over a list rather than as the library writes it, so
+    /// that it is an independent statement of the answer -- ties included. Only release versions are
+    /// generated, so `prefer_release` cannot separate this from the library: it would search a
+    /// release-only sublist which is the whole list.
+    let private reference (policy : RollForward) (requested : string) (versions : string list) : string option =
+        let parsed =
+            versions
+            |> List.choose (fun s -> FxVersion.ParseOrNull s |> Option.ofObj |> Option.map (fun v -> s, v))
+
+        if policy = RollForward.Disable then
+            // The exact range is the requested version's spelling, not its precedence.
+            parsed
+            |> List.tryFind (fun (s, _) -> String.Equals (s, requested, StringComparison.Ordinal))
+            |> Option.map fst
+        else
+
+        let want = FxVersion.Parse (requested, "the test's requested framework")
+
+        let inRange (v : FxVersion) =
+            match policy with
+            | RollForward.LatestPatch -> v.Major = want.Major && v.Minor = want.Minor
+            | RollForward.Minor
+            | RollForward.LatestMinor -> v.Major = want.Major
+            | _ -> true
+
+        let admissible = parsed |> List.filter (fun (_, v) -> v >= want && inRange v)
+
+        match admissible with
+        | [] -> None
+        | _ ->
+
+        let best =
+            match policy with
+            | RollForward.LatestMinor
+            | RollForward.LatestMajor -> admissible |> earliestBest (fun c b -> c > b)
+            | _ -> admissible |> earliestBest (fun c b -> c < b)
+
+        if (snd best).IsPrerelease then
+            Some (fst best)
+        else
+
+        admissible
+        |> List.filter (fun (_, v) -> v.Major = (snd best).Major && v.Minor = (snd best).Minor)
+        |> earliestBest (fun c b -> c > b)
+        |> fst
+        |> Some
+
+    /// The two-phase search pinned for every policy at once, and pinned down to which of two tied
+    /// candidates comes back. Precedence alone does not determine that, so without this the choice
+    /// among equals could change under a refactor and no test would notice.
+    [<Test>]
+    let ``every policy agrees with the search written out longhand, ties included`` () =
+        let property (policy : RollForward, requested : string, versions : string list) : unit =
+            let actual = installed versions |> selectVersion (requesting policy requested)
+            actual |> shouldEqual (reference policy requested versions)
+
+        let arb =
+            Arb.fromGen (Gen.zip3 genPolicy genVersionString (Gen.listOf genVersionString))
+
+        Check.One (Config.QuickThrowOnFailure.WithMaxTest 2000, Prop.forAll arb property)
