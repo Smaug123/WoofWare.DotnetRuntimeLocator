@@ -11,8 +11,6 @@ namespace WoofWare.DotnetRuntimeLocator;
 ///     <para>
 ///         This mirrors hostfxr's <c>fx_ver_t</c> (<c>src/native/corehost/hostmisc/fx_ver.c</c>), which is
 ///         the type every framework-selection decision in <c>fx_resolver.cpp</c> is made against.
-///         <see cref="System.Version" /> cannot stand in for it: it has no prerelease label at all, and it
-///         accepts two- and four-component versions which hostfxr rejects.
 ///     </para>
 ///     <para>
 ///         Two deliberate departures from hostfxr, both places where hostfxr relies on C undefined or
@@ -35,8 +33,7 @@ internal sealed class FxVersion : IComparable<FxVersion>, IComparable, IEquatabl
 {
     /// <summary>
     ///     hostfxr's <c>try_stou</c> copies the digits into a 32-character buffer and refuses anything which
-    ///     does not fit. That limit is observable: a 32-digit prerelease identifier is not "numeric" to
-    ///     hostfxr, so it sorts as an alphanumeric identifier, which ranks above every numeric one.
+    ///     does not fit.
     /// </summary>
     private const int MaxNumericLength = 31;
 
@@ -96,8 +93,7 @@ internal sealed class FxVersion : IComparable<FxVersion>, IComparable, IEquatabl
     }
 
     /// <summary>
-    ///     Order against another <see cref="FxVersion" />, for the comparison contexts which look for the
-    ///     non-generic interface: <c>Comparer.Default</c>, and F#'s comparison operators.
+    ///     Order against another <see cref="FxVersion" />.
     /// </summary>
     /// <exception cref="ArgumentException"><paramref name="obj" /> is not an <see cref="FxVersion" />.</exception>
     public int CompareTo(object? obj)

@@ -239,10 +239,8 @@ public static class DotnetRuntime
     ///         closest match rather than rolling.
     ///     </para>
     ///     <para>
-    ///         Two candidates tie only by differing in build metadata, which takes no part in precedence.
-    ///         Which one hostfxr returns then is not something this library can predict. Its resolver
-    ///         walks a list built by <c>readdir</c>, and its second phase replaces the incumbent on a tie,
-    ///         since <c>std::max(ver, best_match_version)</c> yields <c>ver</c> when neither is smaller.
+    ///         The only way a tie can happen is if two candidates differ only in build metadata.
+    ///         hostfxr's choice in that case is undefined, being derived as the last element of a list built by walking <c>readdir</c>, whose order is undefined.
     ///         The list we are handed instead came from <c>hostfxr_get_dotnet_environment_info</c>, which
     ///         <c>std::sort</c>s by precedence, and that sort is not stable, so even the order of the tied
     ///         pair we receive is unspecified. There is no order here to agree with. We keep the first, so
@@ -270,9 +268,7 @@ public static class DotnetRuntime
         var preferHigher = rollForward is RollForward.LatestMinor or RollForward.LatestMajor;
 
         // Both phases are folds which move off the incumbent only for a strict improvement, so a tie
-        // leaves the earlier candidate standing, which is what MaxBy and MinBy did. Spelling them out
-        // is what makes the answer non-null to the compiler rather than to the reader: this phase
-        // starts from nothing and is checked for it, and the next starts from a value in hand.
+        // leaves the earlier candidate standing.
         RuntimeOnDisk? best = null;
         foreach (var candidate in admissible)
             if (best is null
@@ -286,11 +282,9 @@ public static class DotnetRuntime
         // "If we've found a pre-release version match, then don't apply automatic roll to latest patch."
         if (best.InstalledVersion.IsPrerelease) return best;
 
-        // Seeding with best rather than with the first candidate is safe, and it is what supplies the
-        // starting value the compiler wants. best is itself at its own major.minor, so it is one of the
-        // candidates here; and its version is the extreme of the admissible list in whichever direction
-        // the policy asked for, so among these candidates it either already wins outright or ties for
-        // last. Either way it cannot displace the earliest candidate that this phase should return.
+        // Seeding with best rather than with the first candidate is safe: it is one of the candidates here.
+        // Depending on the policy's ordering, it's either
+        // already the winner or it ties for last among the versions with this major/minor.
         var latestPatch = best;
         foreach (var candidate in admissible)
             if (candidate.InstalledVersion.Major == best.InstalledVersion.Major
