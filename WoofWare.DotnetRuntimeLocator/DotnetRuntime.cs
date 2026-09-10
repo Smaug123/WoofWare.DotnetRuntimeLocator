@@ -218,12 +218,10 @@ public static class DotnetRuntime
     ///     <paramref name="desired" /> to: the one living in the directory the requested version names.
     /// </summary>
     /// <remarks>
-    ///     hostfxr asks the filesystem for that name rather than comparing it against anything, so where
-    ///     the filesystem ignores case a directory differing from the request only in case answers it.
-    ///     Hence the case-insensitive comparison, and hence the preference for the exact spelling, which
-    ///     is the one the request names on a case-sensitive filesystem, the only kind which can hold both.
-    ///     Case is all that is folded: two build labels which differ otherwise are two directories, and so
-    ///     remain two frameworks.
+    ///     hostfxr asks the filesystem for that name rather than comparing it against anything; by contrast,
+    ///     we expose a pure function.
+    ///     We use a case-insensitive comparsion unconditionally, so on a case-sensitive filesystem,
+    ///     we will fail to distinguish versions that hostfxr does distinguish.
     /// </remarks>
     private static DotnetRuntimeSelection ExactDirectoryFor(string name, RequestedFramework desired,
         DotnetEnvironmentInfo env)
