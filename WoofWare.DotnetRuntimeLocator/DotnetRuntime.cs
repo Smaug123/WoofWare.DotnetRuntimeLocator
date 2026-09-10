@@ -150,6 +150,15 @@ public static class DotnetRuntime
             desiredVersions = SoleVersionPerFramework(options.IncludedFrameworks);
         }
 
+        if (rollForward == RollForward.Disable)
+            // hostfxr's "exact" compatibility range consults no list of versions: fx_resolver.cpp
+            // appends the requested version string to the framework directory and takes that directory
+            // or nothing. So none of what follows applies to it -- no version is parsed, none is
+            // rejected for ranking below the request, and a release is not preferred to a prerelease.
+            return desiredVersions
+                .Select(desired => (desired.Key, ExactDirectoryFor(desired.Key, desired.Value, env)))
+                .ToDictionary();
+
         IReadOnlyDictionary<string, IReadOnlyList<RuntimeOnDisk>> availableRuntimes = env
             .Frameworks.SelectMany(availableFramework =>
             {
@@ -205,6 +214,38 @@ public static class DotnetRuntime
     }
 
     /// <summary>
+    ///     The installed framework which hostfxr's exact compatibility range resolves
+    ///     <paramref name="desired" /> to: the one living in the directory the requested version names.
+    /// </summary>
+    /// <remarks>
+    ///     hostfxr asks the filesystem for that name rather than comparing it against anything, so where
+    ///     the filesystem ignores case a directory differing from the request only in case answers it.
+    ///     Hence the case-insensitive comparison, and hence the preference for the exact spelling, which
+    ///     is the one the request names on a case-sensitive filesystem, the only kind which can hold both.
+    ///     Case is all that is folded: two build labels which differ otherwise are two directories, and so
+    ///     remain two frameworks.
+    /// </remarks>
+    private static DotnetRuntimeSelection ExactDirectoryFor(string name, RequestedFramework desired,
+        DotnetEnvironmentInfo env)
+    {
+        DotnetEnvironmentFrameworkInfo? caseVariant = null;
+
+        foreach (var candidate in env.Frameworks)
+        {
+            if (!string.Equals(candidate.Name, name, StringComparison.Ordinal)) continue;
+
+            if (string.Equals(candidate.Version, desired.Version, StringComparison.Ordinal))
+                return new DotnetRuntimeSelection(candidate);
+
+            if (caseVariant is null
+                && string.Equals(candidate.Version, desired.Version, StringComparison.OrdinalIgnoreCase))
+                caseVariant = candidate;
+        }
+
+        return caseVariant is null ? new DotnetRuntimeSelection() : new DotnetRuntimeSelection(caseVariant);
+    }
+
+    /// <summary>
     ///     The version each named framework is requested at, rejecting a list which names one framework more
     ///     than once.
     /// </summary>
@@ -251,14 +292,6 @@ public static class DotnetRuntime
     private static RuntimeOnDisk? SearchForBestFrameworkMatch(RollForward rollForward,
         RequestedFramework desired, IReadOnlyList<RuntimeOnDisk> available)
     {
-        if (rollForward == RollForward.Disable)
-            // hostfxr's "exact" compatibility range never parses or compares versions: it appends the
-            // requested version string to the framework directory and takes that directory or nothing.
-            // So the match is on the version's spelling, which differs from its precedence exactly when
-            // build metadata is present, since build metadata takes no part in precedence.
-            return available.FirstOrDefault(a =>
-                string.Equals(a.Installed.Version, desired.Version, StringComparison.Ordinal));
-
         var admissible = available
             .Where(a => WithinCompatibilityRange(rollForward, desired.ParsedVersion, a.InstalledVersion))
             .ToList();

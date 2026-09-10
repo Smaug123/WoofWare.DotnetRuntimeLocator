@@ -468,6 +468,35 @@ module TestSelectRuntime =
         |> selectVersion (requesting RollForward.Disable "9.0.5+expected")
         |> shouldEqual None
 
+    /// hostfxr never compares the request against the installed list: it appends the requested
+    /// spelling to the framework directory and asks the filesystem for that name. A filesystem which
+    /// ignores case answers yes to a directory differing from the request only in case, so `Disable`
+    /// there resolves a runtime which an ordinal comparison would have refused.
+    [<Test>]
+    let ``Disable matches the installed spelling case-insensitively`` () =
+        installed [ "9.0.0-preview.1" ]
+        |> selectVersion (requesting RollForward.Disable "9.0.0-PREVIEW.1")
+        |> shouldEqual (Some "9.0.0-preview.1")
+
+        // The other direction is the one precedence rejects even earlier: "PREVIEW" sorts below
+        // "preview", so the installed version ranks below the request and the never-roll-backward
+        // filter drops it before any spelling is compared. The exact range does no ranking at all.
+        installed [ "9.0.0-PREVIEW.1" ]
+        |> selectVersion (requesting RollForward.Disable "9.0.0-preview.1")
+        |> shouldEqual (Some "9.0.0-PREVIEW.1")
+
+    /// Only a case-sensitive filesystem can hold both spellings at once, and there the request names
+    /// exactly one of them.
+    [<Test>]
+    let ``Disable prefers the exact spelling to a case variant`` () =
+        installed [ "9.0.5+EXPECTED" ; "9.0.5+expected" ]
+        |> selectVersion (requesting RollForward.Disable "9.0.5+expected")
+        |> shouldEqual (Some "9.0.5+expected")
+
+        installed [ "9.0.5+expected" ; "9.0.5+EXPECTED" ]
+        |> selectVersion (requesting RollForward.Disable "9.0.5+EXPECTED")
+        |> shouldEqual (Some "9.0.5+EXPECTED")
+
     /// Two installed versions tie only by differing in build metadata. hostfxr's own answer then
     /// depends on the order `readdir` gave its resolver, and the list we are handed came from a
     /// different code path which `std::sort`s by precedence -- an unstable sort, so even the order of
@@ -502,13 +531,14 @@ module TestSelectRuntime =
 
     /// Version strings drawn from a small enough space that ties are common: many pairs share a
     /// major.minor.patch and differ only in build metadata, which takes no part in precedence. Those
-    /// are the inputs on which the choice among equals is observable at all.
+    /// are the inputs on which the choice among equals is observable at all. Two of the build labels
+    /// differ from each other only in case, which is what `Disable` folds and precedence does not.
     let private genVersionString : Gen<string> =
         gen {
             let! major = Gen.choose (8, 10)
             let! minor = Gen.choose (0, 2)
             let! patch = Gen.choose (0, 3)
-            let! build = Gen.elements [ "" ; "+a" ; "+b" ]
+            let! build = Gen.elements [ "" ; "+a" ; "+A" ; "+b" ]
             return $"%d{major}.%d{minor}.%d{patch}%s{build}"
         }
 
@@ -531,10 +561,15 @@ module TestSelectRuntime =
             |> List.choose (fun s -> FxVersion.ParseOrNull s |> Option.ofObj |> Option.map (fun v -> s, v))
 
         if policy = RollForward.Disable then
-            // The exact range is the requested version's spelling, not its precedence.
-            parsed
-            |> List.tryFind (fun (s, _) -> String.Equals (s, requested, StringComparison.Ordinal))
-            |> Option.map fst
+            // The exact range names a directory rather than a version: the requested spelling is
+            // appended to the framework directory and the filesystem asked for it. So no version is
+            // parsed, and a filesystem which ignores case answers a request differing only in case --
+            // though where both spellings are present it is the requested one which is named.
+            let named (comparison : StringComparison) =
+                versions |> List.tryFind (fun s -> String.Equals (s, requested, comparison))
+
+            named StringComparison.Ordinal
+            |> Option.orElseWith (fun () -> named StringComparison.OrdinalIgnoreCase)
         else
 
         let want = FxVersion.Parse (requested, "the test's requested framework")
