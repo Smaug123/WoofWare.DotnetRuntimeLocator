@@ -1,6 +1,7 @@
 namespace WoofWare.DotnetRuntimeLocator.Test
 
 open System
+open System.Collections.Generic
 open System.IO
 open System.Reflection
 open System.Text.Json
@@ -123,8 +124,8 @@ module TestRuntimeConfigParse =
     /// top-level one. Every expectation here was measured against the real host on
     /// Microsoft.NETCore.App 10.0.7: it escapes only `"`, `\` and the C0 controls, so HTML-sensitive
     /// characters, DEL, Latin-1, U+2028, U+2029 and astral-plane characters all survive as
-    /// themselves. This is precisely what the first version of this code got wrong by rendering
-    /// through `Utf8JsonWriter`, whose default encoder escapes most of them.
+    /// themselves. Note that `Utf8JsonWriter`'s default encoder escapes most of them, so it cannot be
+    /// used to render these.
     [<Test>]
     let ``Nested strings are escaped exactly as the host escapes them`` () =
         let content =
@@ -324,6 +325,108 @@ module TestRuntimeConfigParse =
         exn.Message |> shouldContainText "undefined JsonElement"
 
     // ------------------------------------------------------------------
+    // A JSON null in a slot the type declares non-nullable.
+    // ------------------------------------------------------------------
+
+    /// C#'s `required` checks that the JSON *member is present*, not that its value is non-null, so
+    /// without an explicit check each of these deserializes happily and hands the caller a null in a
+    /// slot the type says can never be null.
+    [<TestCase("""{"runtimeOptions":null}""", "runtimeOptions")>]
+    [<TestCase("""{"runtimeOptions":{"tfm":null}}""", "tfm")>]
+    [<TestCase("""{"runtimeOptions":{"tfm":"net8.0","framework":{"name":null,"version":"8.0.0"}}}""", "name")>]
+    [<TestCase("""{"runtimeOptions":{"tfm":"net8.0","framework":{"name":"Microsoft.NETCore.App","version":null}}}""",
+               "version")>]
+    // The array-valued members too: a null in an element is exactly as fatal as one at the top level.
+    [<TestCase("""{"runtimeOptions":{"tfm":"net8.0","frameworks":[{"name":null,"version":"8.0.0"}]}}""", "name")>]
+    [<TestCase("""{"runtimeOptions":{"tfm":"net8.0","includedFrameworks":[{"name":"A","version":null}]}}""", "version")>]
+    // A whole element spelled null, rather than a member inside one. The lists are optional, but their
+    // *elements* are not, and nothing constructs a `RuntimeConfigFramework` here for an accessor to
+    // catch — so this needs checking on the list itself.
+    [<TestCase("""{"runtimeOptions":{"tfm":"net8.0","frameworks":[null]}}""", "frameworks")>]
+    [<TestCase("""{"runtimeOptions":{"tfm":"net8.0","frameworks":[{"name":"A","version":"1.0"},null]}}""", "frameworks")>]
+    [<TestCase("""{"runtimeOptions":{"tfm":"net8.0","includedFrameworks":[null]}}""", "includedFrameworks")>]
+    let ``A null in a non-nullable member is rejected, naming the member`` (content : string) (jsonMember : string) =
+        let exn =
+            Assert.Throws<JsonException> (fun () -> DotnetRuntime.DeserializeRuntimeConfig content |> ignore)
+
+        exn.Message |> shouldContainText jsonMember
+
+    /// The types are public and carry their own `JsonPropertyName`s, so a consumer may reasonably
+    /// deserialize them without going through `DeserializeRuntimeConfig`. The invariant has to hold on
+    /// that path too, which rules out validating in `DeserializeRuntimeConfig` itself.
+    [<Test>]
+    let ``The rejection does not depend on going through DeserializeRuntimeConfig`` () =
+        let exn =
+            Assert.Throws<JsonException> (fun () ->
+                JsonSerializer.Deserialize<RuntimeConfig> """{"runtimeOptions":null}"""
+                |> ignore
+            )
+
+        exn.Message |> shouldContainText "runtimeOptions"
+
+    /// Constructing one directly is checked too: the invariant belongs to the type, not to the
+    /// deserializer, and a `RuntimeConfig` built in code is just as likely to be handed to a consumer.
+    /// It is a `JsonException` even here, because `JsonSerializer` propagates whatever an `init`
+    /// accessor throws unwrapped, so an accessor which threw anything else would leak a second
+    /// exception type out of a parse call — which is the more common path by far.
+    [<Test>]
+    let ``Constructing with a null is rejected as well`` () =
+        let exn =
+            Assert.Throws<JsonException> (fun () -> RuntimeConfig (RuntimeOptions = null) |> ignore)
+
+        exn.Message |> shouldContainText "runtimeOptions"
+
+    /// The counterpart control: the members which really are optional must keep deserializing from an
+    /// explicit null, rather than being swept up by the rejection above. On the real host
+    /// (Microsoft.NETCore.App 9.0.0), a runtimeconfig.json with `"configProperties": null` runs the app
+    /// to completion, so refusing this file would be inventing a rule the format does not have.
+    [<Test>]
+    let ``A null in a genuinely optional member still parses`` () =
+        let content =
+            """{"runtimeOptions":{"tfm":"net8.0","framework":null,"frameworks":null,"includedFrameworks":null,"rollForward":null,"configProperties":null}}"""
+
+        let actual = DotnetRuntime.DeserializeRuntimeConfig content
+
+        actual.RuntimeOptions.Tfm |> shouldEqual "net8.0"
+        actual.RuntimeOptions.Framework |> shouldEqual null
+        actual.RuntimeOptions.Frameworks |> shouldEqual null
+        actual.RuntimeOptions.IncludedFrameworks |> shouldEqual null
+        actual.RuntimeOptions.RollForward |> shouldEqual (Nullable ())
+        actual.RuntimeOptions.ConfigProperties |> shouldEqual null
+        hostProperties actual.RuntimeOptions |> shouldEqual []
+
+    /// Checking the entries once is not enough on its own: if the caller's own list were kept, they
+    /// could null an entry afterwards and the "no null entries" claim would stop being true of an
+    /// object which had already been validated. So the entries are snapshotted as they are checked.
+    [<Test>]
+    let ``A list handed in at construction is snapshotted, not aliased`` () =
+        let source =
+            [| RuntimeConfigFramework (Name = "Microsoft.NETCore.App", Version = "8.0.0") |]
+
+        let options =
+            RuntimeOptions (Tfm = "net8.0", Frameworks = (source :> IReadOnlyList<RuntimeConfigFramework>))
+
+        source.[0] <- null
+
+        options.Frameworks.Count |> shouldEqual 1
+
+        options.Frameworks.[0]
+        |> shouldEqual (RuntimeConfigFramework (Name = "Microsoft.NETCore.App", Version = "8.0.0"))
+
+    /// The other direction: what we hand out cannot be downcast to something mutable, which `List<_>` —
+    /// what the deserializer builds — otherwise can be.
+    [<Test>]
+    let ``The exposed list cannot be mutated through a downcast`` () =
+        let content =
+            """{"runtimeOptions":{"tfm":"net8.0","frameworks":[{"name":"Microsoft.NETCore.App","version":"8.0.0"}]}}"""
+
+        let actual = DotnetRuntime.DeserializeRuntimeConfig content
+        let asMutable = actual.RuntimeOptions.Frameworks :?> IList<RuntimeConfigFramework>
+
+        asMutable.IsReadOnly |> shouldEqual true
+        Assert.Throws<NotSupportedException> (fun () -> asMutable.[0] <- null) |> ignore
+
+    // ------------------------------------------------------------------
     // Property test: the projection against an independent renderer.
     // ------------------------------------------------------------------
 
@@ -342,10 +445,10 @@ module TestRuntimeConfigParse =
     /// form, DEL, Latin-1, the HTML-sensitive characters a JavaScript encoder would escape but the host
     /// does not, the JavaScript line terminators, and an astral-plane character.
     ///
-    /// An earlier version of this generator was restricted to `[A-Za-z0-9 ._-]`, on the reasoning that
-    /// the oracle should not have to reimplement an escaping policy to agree with it. That did not
-    /// decouple the test from the policy; it deleted the only inputs which could detect getting the
-    /// policy wrong, and it duly hid a real bug. Fragments are whole strings rather than chars so that
+    /// Restricting this generator to something like `[A-Za-z0-9 ._-]`, on the reasoning that the oracle
+    /// should not have to reimplement an escaping policy to agree with it, does not decouple the test
+    /// from the policy: it deletes the only inputs which could detect getting the policy wrong.
+    /// Fragments are whole strings rather than chars so that
     /// the astral one contributes a complete surrogate pair: a lone surrogate cannot appear in JSON,
     /// and the serialiser would substitute U+FFFD for it.
     let private genSafeString : Gen<string> =
@@ -519,3 +622,207 @@ module TestRuntimeConfigParse =
             actual = expected
 
         Check.One (Config.QuickThrowOnFailure.WithMaxTest 500, Prop.forAll (Arb.fromGen genConfigProperties) property)
+
+    // ------------------------------------------------------------------
+    // Property test: a null in any non-nullable member, wherever it sits.
+    // ------------------------------------------------------------------
+
+    type private FrameworkModel =
+        {
+            Name : string
+            Version : string
+        }
+
+    type private ConfigModel =
+        {
+            Tfm : string
+            Framework : FrameworkModel option
+            Frameworks : FrameworkModel list
+            IncludedFrameworks : FrameworkModel list
+        }
+
+    /// A place in the document holding a value whose slot in the parsed type is non-nullable. The
+    /// cases are enumerated from the *model* rather than from the implementation, which is what makes
+    /// this an oracle: a member the implementation forgets to check still appears here, and the
+    /// property then fails at it.
+    type private Position =
+        | AtRuntimeOptions
+        | AtTfm
+        | AtFrameworkName
+        | AtFrameworkVersion
+        | AtFrameworksName of int
+        | AtFrameworksVersion of int
+        | AtIncludedName of int
+        | AtIncludedVersion of int
+        /// A whole element of one of the lists, rather than a member inside one. The lists themselves
+        /// are optional, but their elements are not.
+        | AtFrameworksElement of int
+        | AtIncludedElement of int
+
+    /// The JSON member name at this position: what the rejection is required to name, so that the
+    /// file's author can find the offending line.
+    let private memberName (position : Position) : string =
+        match position with
+        | Position.AtRuntimeOptions -> "runtimeOptions"
+        | Position.AtTfm -> "tfm"
+        | Position.AtFrameworkName
+        | Position.AtFrameworksName _
+        | Position.AtIncludedName _ -> "name"
+        | Position.AtFrameworkVersion
+        | Position.AtFrameworksVersion _
+        | Position.AtIncludedVersion _ -> "version"
+        // A null element has no member name of its own, so the containing list is what gets named.
+        | Position.AtFrameworksElement _ -> "frameworks"
+        | Position.AtIncludedElement _ -> "includedFrameworks"
+
+    /// Every position this particular document actually has: an array index only exists if the array
+    /// is that long, and the single `framework` only if the model has one.
+    let private positions (model : ConfigModel) : Position list =
+        [
+            Position.AtRuntimeOptions
+            Position.AtTfm
+
+            match model.Framework with
+            | Some _ ->
+                Position.AtFrameworkName
+                Position.AtFrameworkVersion
+            | None -> ()
+
+            for i in 0 .. model.Frameworks.Length - 1 do
+                Position.AtFrameworksName i
+                Position.AtFrameworksVersion i
+                Position.AtFrameworksElement i
+
+            for i in 0 .. model.IncludedFrameworks.Length - 1 do
+                Position.AtIncludedName i
+                Position.AtIncludedVersion i
+                Position.AtIncludedElement i
+        ]
+
+    /// Render the model as a runtimeconfig.json, replacing the value at `nulled` — if there is one —
+    /// with JSON null. Strings are quoted by `System.Text.Json` so that the input does not depend on
+    /// any escaping decision of ours.
+    let private renderConfig (model : ConfigModel) (nulled : Position option) : string =
+        let value (position : Position) (v : string) : string =
+            if nulled = Some position then
+                "null"
+            else
+                JsonSerializer.Serialize v
+
+        let renderFramework (namePosition : Position) (versionPosition : Position) (f : FrameworkModel) : string =
+            $"""{{"name":%s{value namePosition f.Name},"version":%s{value versionPosition f.Version}}}"""
+
+        let renderList
+            (name : string)
+            (at : int -> Position * Position * Position)
+            (frameworks : FrameworkModel list)
+            : string
+            =
+            frameworks
+            |> List.mapi (fun i f ->
+                let namePosition, versionPosition, elementPosition = at i
+
+                if nulled = Some elementPosition then
+                    "null"
+                else
+                    renderFramework namePosition versionPosition f
+            )
+            |> String.concat ","
+            |> sprintf """"%s":[%s]""" name
+
+        let options =
+            if nulled = Some Position.AtRuntimeOptions then
+                "null"
+            else
+                [
+                    $""""tfm":%s{value Position.AtTfm model.Tfm}"""
+
+                    match model.Framework with
+                    | Some f ->
+                        $""""framework":%s{renderFramework Position.AtFrameworkName Position.AtFrameworkVersion f}"""
+                    | None -> ()
+
+                    renderList
+                        "frameworks"
+                        (fun i ->
+                            Position.AtFrameworksName i, Position.AtFrameworksVersion i, Position.AtFrameworksElement i
+                        )
+                        model.Frameworks
+
+                    renderList
+                        "includedFrameworks"
+                        (fun i -> Position.AtIncludedName i, Position.AtIncludedVersion i, Position.AtIncludedElement i)
+                        model.IncludedFrameworks
+                ]
+                |> String.concat ","
+                |> sprintf "{%s}"
+
+        $"""{{"runtimeOptions":%s{options}}}"""
+
+    let private genFrameworkModel : Gen<FrameworkModel> =
+        Gen.zip genSafeString genSafeString
+        |> Gen.map (fun (name, version) ->
+            {
+                Name = name
+                Version = version
+            }
+        )
+
+    let private genConfigModel : Gen<ConfigModel> =
+        gen {
+            let! tfm = genSafeString
+            let! framework = Gen.optionOf genFrameworkModel
+            let! frameworks = Gen.listOf genFrameworkModel
+            let! included = Gen.listOf genFrameworkModel
+
+            return
+                {
+                    Tfm = tfm
+                    Framework = framework
+                    Frameworks = frameworks
+                    IncludedFrameworks = included
+                }
+        }
+
+    [<Test>]
+    let ``A null anywhere a non-nullable member sits is rejected`` () =
+        let property (model : ConfigModel) : bool =
+            // Control: the same document without any null parses, and parses back to the model it was
+            // rendered from. Without this, a document which was malformed for some other reason would
+            // make every rejection below vacuous.
+            let control = DotnetRuntime.DeserializeRuntimeConfig (renderConfig model None)
+
+            let asModel (f : RuntimeConfigFramework) : FrameworkModel =
+                {
+                    Name = f.Name
+                    Version = f.Version
+                }
+
+            control.RuntimeOptions.Tfm |> shouldEqual model.Tfm
+
+            control.RuntimeOptions.Framework
+            |> Option.ofObj
+            |> Option.map asModel
+            |> shouldEqual model.Framework
+
+            control.RuntimeOptions.Frameworks
+            |> Seq.map asModel
+            |> List.ofSeq
+            |> shouldEqual model.Frameworks
+
+            control.RuntimeOptions.IncludedFrameworks
+            |> Seq.map asModel
+            |> List.ofSeq
+            |> shouldEqual model.IncludedFrameworks
+
+            for position in positions model do
+                let content = renderConfig model (Some position)
+
+                let exn =
+                    Assert.Throws<JsonException> (fun () -> DotnetRuntime.DeserializeRuntimeConfig content |> ignore)
+
+                exn.Message |> shouldContainText (memberName position)
+
+            true
+
+        Check.One (Config.QuickThrowOnFailure.WithMaxTest 200, Prop.forAll (Arb.fromGen genConfigModel) property)
