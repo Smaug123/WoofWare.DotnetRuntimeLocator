@@ -11,7 +11,7 @@
     <Copyright>Copyright (c) Patrick Stevens 2024</Copyright>
     <Description>Helpers to locate the .NET runtime and SDKs</Description>
     <RepositoryType>git</RepositoryType>
-    <RepositoryUrl>https://github.com/Smaug123/WoofWare.DotnetRuntimeLocator</RepositoryUrl>
+    <RepositoryUrl>https://github.com/WoofWare/WoofWare.DotnetRuntimeLocator</RepositoryUrl>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageIcon>light.png</PackageIcon>
