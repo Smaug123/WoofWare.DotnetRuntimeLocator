@@ -83,12 +83,20 @@ public record DotnetEnvironmentInfo(
         handle.Target = toRet;
     }
 
+    /// <summary>
+    ///     <paramref name="path" /> as the string hostfxr takes it.
+    /// </summary>
+    internal static byte[] EncodeForHostFxr(string path)
+    {
+        return Encoding.ASCII.GetBytes(path);
+    }
+
     private static unsafe DotnetEnvironmentInfo CallDelegate(string? dotnetExePath, RuntimeDelegate f)
     {
         byte[]? dotnet = null;
         if (dotnetExePath != null)
         {
-            dotnet = Encoding.ASCII.GetBytes(dotnetExePath);
+            dotnet = EncodeForHostFxr(dotnetExePath);
         }
         fixed (byte* dotnetPath = dotnet)
         {
